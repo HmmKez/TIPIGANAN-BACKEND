@@ -26,6 +26,7 @@ class Thesis extends Model
             'abstract'       => $this->abstract,
             'keywords'       => $this->keywords,
             'year_published' => $this->year_published,
+            'category_id'    => $this->category_id,
         ];
     }
 

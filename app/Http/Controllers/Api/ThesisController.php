@@ -9,6 +9,7 @@ use App\Models\SignedUrlToken;
 use App\Models\Thesis;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use App\Jobs\ProcessThesisOcr;
 
 class ThesisController extends Controller
 {
@@ -154,6 +155,9 @@ class ThesisController extends Controller
             'status'          => 'active',
             'uploaded_by'     => $request->user()->id,
         ]);
+
+        // Dispatch OCR job to run in background
+        ProcessThesisOcr::dispatch($thesis);
 
         AuditLog::create([
             'user_id'     => $request->user()->id,
