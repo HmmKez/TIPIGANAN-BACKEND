@@ -94,8 +94,6 @@ async function extractFromScannedPdf(filePath) {
 async function run() {
     try {
         const buffer = fs.readFileSync(filePath);
-
-        // Try digital extraction first
         const data = await pdfParse(buffer);
         const hasText = data.text && data.text.trim().length > 100;
 
@@ -103,13 +101,13 @@ async function run() {
         if (hasText) {
             result = await extractFromDigitalPdf(buffer);
         } else {
-            // Fallback to OCR for scanned PDFs
             result = await extractFromScannedPdf(filePath);
         }
 
-        console.log(JSON.stringify(result));
+        // Print ONLY the final JSON, nothing else
+        process.stdout.write(JSON.stringify(result));
     } catch (err) {
-        console.error(JSON.stringify({ error: err.message }));
+        process.stdout.write(JSON.stringify({ error: err.message }));
         process.exit(1);
     }
 }

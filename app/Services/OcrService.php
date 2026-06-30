@@ -3,27 +3,27 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class OcrService
 {
-    /**
-     * Extract text sections from a PDF file.
-     * Returns array with: title, abstract, introduction, keywords, conclusion, method
-     */
     public function extract(string $filePath): array
     {
-        $absolutePath = storage_path('app/' . $filePath);
-
-        if (! file_exists($absolutePath)) {
-            Log::error("OCR: File not found at {$absolutePath}");
+        if (! Storage::disk('local')->exists($filePath)) {
+            Log::error("OCR: File not found in storage: {$filePath}");
             return $this->emptyResult();
         }
 
-        $scriptPath = base_path('ocr/extract.js');
+        $absolutePath = Storage::disk('local')->path($filePath);
+
+        Log::info("OCR: Checking resolved path: " . $absolutePath);
+
+        $scriptPath = base_path('ocr/extract.cjs');
         $escapedPath = escapeshellarg($absolutePath);
 
-        // Run the Node.js OCR script
         $output = shell_exec("node {$scriptPath} {$escapedPath} 2>&1");
+
+        Log::info("OCR: Raw output from Node script: " . $output);
 
         if (! $output) {
             Log::error("OCR: No output from script for {$filePath}");
@@ -32,8 +32,8 @@ class OcrService
 
         $result = json_decode($output, true);
 
-        if (isset($result['error'])) {
-            Log::error("OCR error: " . $result['error']);
+        if ($result === null) {
+            Log::error("OCR: Failed to parse JSON. Raw output was: " . $output);
             return $this->emptyResult();
         }
 
@@ -47,9 +47,6 @@ class OcrService
         ];
     }
 
-    /**
-     * Combine extracted sections into a single searchable string.
-     */
     public function toSearchableText(array $extracted): string
     {
         return implode(' ', array_filter([
