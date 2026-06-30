@@ -1,13 +1,18 @@
 const fs = require('fs');
-const path = require('path');
-const pdfParse = require('pdf-parse');
+const { PDFParse } = require('pdf-parse');
 const Tesseract = require('tesseract.js');
 
 const filePath = process.argv[2];
 
 if (!filePath || !fs.existsSync(filePath)) {
-    console.error(JSON.stringify({ error: 'File not found: ' + filePath }));
+    process.stdout.write(JSON.stringify({ error: 'File not found: ' + filePath }));
     process.exit(1);
+}
+
+async function parsePdfText(buffer) {
+    const parser = new PDFParse({ data: buffer });
+    const result = await parser.getText();
+    return result.text || '';
 }
 
 async function extractKeySection(text, sectionNames, nextSections) {
@@ -18,13 +23,11 @@ async function extractKeySection(text, sectionNames, nextSections) {
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim().toLowerCase();
 
-        // Start capturing when we hit the section heading
         if (sectionNames.some(s => line === s || line.startsWith(s))) {
             capturing = true;
             continue;
         }
 
-        // Stop capturing when we hit the next section
         if (capturing && nextSections.some(s => line === s || line.startsWith(s))) {
             break;
         }
@@ -34,13 +37,10 @@ async function extractKeySection(text, sectionNames, nextSections) {
         }
     }
 
-    return result.join(' ').substring(0, 2000); // limit per section
+    return result.join(' ').substring(0, 2000);
 }
 
-async function extractFromDigitalPdf(buffer) {
-    const data = await pdfParse(buffer);
-    const text = data.text;
-
+async function extractFromDigitalPdf(text) {
     const title = text.split('\n').slice(0, 5).join(' ').trim();
 
     const abstract = await extractKeySection(text,
@@ -68,7 +68,7 @@ async function extractFromDigitalPdf(buffer) {
 
 async function extractFromScannedPdf(filePath) {
     const { data: { text } } = await Tesseract.recognize(filePath, 'eng', {
-        logger: () => {} // suppress progress logs
+        logger: () => {}
     });
 
     const title = text.split('\n').slice(0, 5).join(' ').trim();
@@ -94,17 +94,17 @@ async function extractFromScannedPdf(filePath) {
 async function run() {
     try {
         const buffer = fs.readFileSync(filePath);
-        const data = await pdfParse(buffer);
-        const hasText = data.text && data.text.trim().length > 100;
+
+        const text = await parsePdfText(buffer);
+        const hasText = text && text.trim().length > 100;
 
         let result;
         if (hasText) {
-            result = await extractFromDigitalPdf(buffer);
+            result = await extractFromDigitalPdf(text);
         } else {
             result = await extractFromScannedPdf(filePath);
         }
 
-        // Print ONLY the final JSON, nothing else
         process.stdout.write(JSON.stringify(result));
     } catch (err) {
         process.stdout.write(JSON.stringify({ error: err.message }));
