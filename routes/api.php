@@ -42,6 +42,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/audit-logs',         [AuditLogController::class, 'index']);
         Route::get('/audit-logs/{id}',    [AuditLogController::class, 'show']);
 
+        Route::middleware('permission:export_reports')->group(function () {
+            Route::get('/audit-logs/export', [AuditLogController::class, 'exportPdf']);
+            Route::get('/reports/export', [ReportController::class, 'exportPdf']);
+        });
+
         // Reports
         Route::prefix('reports')->group(function () {
             Route::get('/dashboard',      [ReportController::class, 'dashboard']);
