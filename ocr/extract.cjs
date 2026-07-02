@@ -15,52 +15,163 @@ async function parsePdfText(buffer) {
     return result.text || '';
 }
 
-async function extractKeySection(text, sectionNames, nextSections) {
-    const lines = text.split('\n');
-    let capturing = false;
-    let result = [];
+function normalizeLine(line) {
+    return line.trim().toLowerCase()
+        .replace(/^[\d]+[\.\)]\s*/, '')
+        .replace(/^[ivxlcdm]+[\.\)]\s*/i, '')
+        .replace(/:$/, '')
+        .trim();
+}
+
+function matchesHeading(line, headings) {
+    const normalized = normalizeLine(line);
+    return headings.some(h => normalized === h || normalized.startsWith(h));
+}
+
+function extractInlineValue(line, headings) {
+    const lower = line.toLowerCase();
+    for (const h of headings) {
+        const colonForm = h + ':';
+        const idx = lower.indexOf(colonForm);
+        if (idx !== -1) {
+            const value = line.substring(idx + colonForm.length).trim();
+            if (value.length > 0) return value;
+        }
+    }
+    return null;
+}
+
+// Skip past Table of Contents so we don't match TOC entries
+function skipTableOfContents(lines) {
+    const tocMarkers = [
+        'table of contents', 'contents', 'list of contents'
+    ];
+
+    // Chapter body markers — signals we've left the TOC
+    const chapterMarkers = [
+        'chapter i', 'chapter 1', 'chapter one',
+        'i. introduction', '1. introduction',
+        'introduction', 'abstract', 'background of the study',
+        'project context'
+    ];
+
+    let inToc = false;
+    let tocEndIndex = 0;
 
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim().toLowerCase();
+        const norm = lines[i].trim().toLowerCase();
 
-        if (sectionNames.some(s => line === s || line.startsWith(s))) {
+        if (!inToc && tocMarkers.some(t => norm.includes(t))) {
+            inToc = true;
+            continue;
+        }
+
+        if (inToc) {
+            // Look for page numbers (lines ending in digits) — TOC pattern
+            const isTocLine = /\d+\s*$/.test(lines[i].trim());
+
+            // Look for a line that signals actual chapter content starting
+            const isChapterStart = chapterMarkers.some(c =>
+                norm === c || norm.startsWith(c)
+            );
+
+            if (isChapterStart && !isTocLine) {
+                tocEndIndex = i;
+                break;
+            }
+        }
+    }
+
+    return tocEndIndex > 0 ? tocEndIndex : 0;
+}
+
+async function extractKeySection(lines, startFrom, sectionNames, nextSections, maxLines = 80) {
+    let capturing = false;
+    let result = [];
+    let lineCount = 0;
+
+    for (let i = startFrom; i < lines.length; i++) {
+        const raw = lines[i];
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+
+        // Check for inline value (e.g. "Keywords: RFID, ocr")
+        if (!capturing) {
+            const inline = extractInlineValue(trimmed, sectionNames);
+            if (inline && inline.length > 0) {
+                return inline.substring(0, 2000);
+            }
+        }
+
+        if (!capturing && matchesHeading(trimmed, sectionNames)) {
             capturing = true;
             continue;
         }
 
-        if (capturing && nextSections.some(s => line === s || line.startsWith(s))) {
+        if (capturing && matchesHeading(trimmed, nextSections)) {
             break;
         }
 
-        if (capturing && lines[i].trim()) {
-            result.push(lines[i].trim());
+        if (capturing) {
+            if (lineCount >= maxLines) break;
+            result.push(trimmed);
+            lineCount++;
         }
     }
 
     return result.join(' ').substring(0, 2000);
 }
 
+function extractTitle(lines) {
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.length > 10 && trimmed.length < 250 && /[a-zA-Z]{4,}/.test(trimmed)) {
+            // Skip lines that look like author lists or page numbers
+            if (/^\d+$/.test(trimmed)) continue;
+            if (trimmed.toLowerCase().startsWith('group')) continue;
+            return trimmed;
+        }
+    }
+    return '';
+}
+
 async function extractFromDigitalPdf(text) {
-    const title = text.split('\n').slice(0, 5).join(' ').trim();
+    const lines = text.split('\n');
+    const title = extractTitle(lines);
 
-    const abstract = await extractKeySection(text,
+    // Find where TOC ends so we start searching from real content
+    const contentStart = skipTableOfContents(lines);
+
+    const abstract = await extractKeySection(lines, contentStart,
         ['abstract'],
-        ['introduction', 'chapter 1', 'i.', '1.']
+        ['introduction', 'chapter 1', 'chapter i', 'background',
+         'background of the study', 'keywords', 'key words',
+         'table of contents', 'acknowledgment'],
+        60
     );
 
-    const introduction = await extractKeySection(text,
-        ['introduction', 'chapter 1', 'i. introduction'],
-        ['review', 'chapter 2', 'ii.', '2.', 'methodology']
+    const introduction = await extractKeySection(lines, contentStart,
+        ['introduction', 'chapter 1', 'chapter i', 'chapter one',
+         'project context', 'background of the study', '1.1 project context'],
+        ['review', 'related literature', 'chapter 2', 'chapter ii',
+         'methodology', 'theoretical framework', 'technical background',
+         'chapter iii', 'chapter 3', '2.'],
+        80
     );
 
-    const keywords = await extractKeySection(text,
-        ['keywords', 'key words'],
-        ['abstract', 'introduction', 'chapter']
+    const keywords = await extractKeySection(lines, 0, // keywords can appear before TOC skip
+        ['keywords', 'key words', 'index terms'],
+        ['abstract', 'introduction', 'chapter', 'background', '1.', 'table'],
+        5
     );
 
-    const conclusion = await extractKeySection(text,
-        ['conclusion', 'conclusions', 'summary', 'v. conclusion'],
-        ['recommendation', 'references', 'bibliography', 'appendix']
+    const conclusion = await extractKeySection(lines, contentStart,
+        ['conclusion', 'conclusions', 'summary and conclusion',
+         'conclusions and recommendations', 'chapter 5', 'chapter v',
+         '5. conclusion', 'v. conclusion'],
+        ['recommendation', 'recommendations', 'references',
+         'bibliography', 'appendix', 'appendices'],
+        60
     );
 
     return { title, abstract, introduction, keywords, conclusion, method: 'digital' };
@@ -71,21 +182,26 @@ async function extractFromScannedPdf(filePath) {
         logger: () => {}
     });
 
-    const title = text.split('\n').slice(0, 5).join(' ').trim();
+    const lines = text.split('\n');
+    const title = extractTitle(lines);
+    const contentStart = skipTableOfContents(lines);
 
-    const abstract = await extractKeySection(text,
+    const abstract = await extractKeySection(lines, contentStart,
         ['abstract'],
-        ['introduction', 'chapter 1']
+        ['introduction', 'chapter 1', 'keywords', 'key words'],
+        60
     );
 
-    const keywords = await extractKeySection(text,
-        ['keywords', 'key words'],
-        ['abstract', 'introduction']
+    const keywords = await extractKeySection(lines, 0,
+        ['keywords', 'key words', 'index terms'],
+        ['abstract', 'introduction', 'chapter'],
+        5
     );
 
-    const conclusion = await extractKeySection(text,
-        ['conclusion', 'conclusions'],
-        ['recommendation', 'references', 'bibliography']
+    const conclusion = await extractKeySection(lines, contentStart,
+        ['conclusion', 'conclusions', 'summary and conclusion'],
+        ['recommendation', 'references', 'bibliography', 'appendix'],
+        60
     );
 
     return { title, abstract, introduction: '', keywords, conclusion, method: 'ocr' };
@@ -94,7 +210,6 @@ async function extractFromScannedPdf(filePath) {
 async function run() {
     try {
         const buffer = fs.readFileSync(filePath);
-
         const text = await parsePdfText(buffer);
         const hasText = text && text.trim().length > 100;
 
