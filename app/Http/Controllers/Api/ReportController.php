@@ -9,6 +9,7 @@ use App\Models\Thesis;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class ReportController extends Controller
 {
@@ -118,5 +119,223 @@ class ReportController extends Controller
                                     ->with('thesis:id,title,authors')
                                     ->get(),
         ]);
+    }
+
+    public function exportPdf(Request $request)
+    {
+        $request->validate([
+            'report' => ['required', 'in:dashboard,most-cited,by-department,by-year,most-searched,most-active,peak-hours'],
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+        ]);
+
+        $user = $request->user();
+
+        if (! $user || ! $user->hasPermissionTo('export_reports')) {
+            abort(403, 'You do not have permission to export reports.');
+        }
+
+        $reportType = $request->input('report');
+        $dateFrom = $request->input('date_from');
+        $dateTo = $request->input('date_to');
+        $reportTitle = $this->reportTitle($reportType);
+
+        $data = $this->collectReportData($reportType, $dateFrom, $dateTo);
+
+        $pdf = Pdf::loadView('pdf.pdf_report', [
+            'title' => $reportTitle,
+            'subtitle' => 'Generated report',
+            'generatedAt' => now()->format('Y-m-d H:i:s'),
+            'dateRange' => $this->formatDateRange($dateFrom, $dateTo),
+            'columns' => $data['columns'],
+            'rows' => $data['rows'],
+        ])->setPaper('a4', 'portrait');
+
+        return $pdf->download(str_replace(' ', '_', strtolower($reportTitle)) . '.pdf');
+    }
+
+    private function reportTitle(string $reportType): string
+    {
+        return match ($reportType) {
+            'dashboard' => 'Dashboard Summary',
+            'most-cited' => 'Most Cited Theses',
+            'by-department' => 'Thesis Count by Department',
+            'by-year' => 'Thesis Count by Year',
+            'most-searched' => 'Most Searched Keywords',
+            'most-active' => 'Most Active Users',
+            'peak-hours' => 'Peak Usage Hours',
+            default => 'Report',
+        };
+    }
+
+    private function collectReportData(string $reportType, ?string $dateFrom, ?string $dateTo): array
+    {
+        return match ($reportType) {
+            'dashboard' => $this->dashboardReportData(),
+            'most-cited' => $this->mostCitedReportData(),
+            'by-department' => $this->byDepartmentReportData(),
+            'by-year' => $this->byYearReportData(),
+            'most-searched' => $this->mostSearchedReportData(),
+            'most-active' => $this->mostActiveUsersReportData(),
+            'peak-hours' => $this->peakHoursReportData(),
+            default => ['columns' => [], 'rows' => []],
+        };
+    }
+
+    private function formatDateRange(?string $from, ?string $to): string
+    {
+        if ($from && $to) {
+            return $from . ' to ' . $to;
+        }
+
+        if ($from) {
+            return 'From ' . $from;
+        }
+
+        if ($to) {
+            return 'Until ' . $to;
+        }
+
+        return 'All available records';
+    }
+
+    private function dashboardReportData(): array
+    {
+        $summary = $this->dashboard()->getData(true);
+
+        return [
+            'columns' => ['Metric', 'Value'],
+            'rows' => [
+                ['Total Theses', $summary['total_theses']],
+                ['Total Users', $summary['total_users']],
+                ['Total Citations', $summary['total_citations']],
+                ['Total Categories', $summary['total_categories']],
+            ],
+        ];
+    }
+
+    private function mostCitedReportData(): array
+    {
+        $results = CitationLog::select('thesis_id', DB::raw('COUNT(*) as citation_count'))
+            ->groupBy('thesis_id')
+            ->orderByDesc('citation_count')
+            ->limit(10)
+            ->with('thesis:id,title,authors,year_published,category_id')
+            ->get();
+
+        return [
+            'columns' => ['Thesis', 'Authors', 'Year', 'Citation Count'],
+            'rows' => $results->map(function ($item) {
+                return [
+                    $item->thesis?->title ?? 'Unknown',
+                    $item->thesis?->authors ?? '-',
+                    $item->thesis?->year_published ?? '-',
+                    $item->citation_count,
+                ];
+            })->toArray(),
+        ];
+    }
+
+    private function byDepartmentReportData(): array
+    {
+        $results = Thesis::select('category_id', DB::raw('COUNT(*) as total'))
+            ->where('status', 'active')
+            ->groupBy('category_id')
+            ->with('category:id,name')
+            ->get();
+
+        return [
+            'columns' => ['Department', 'Total Theses'],
+            'rows' => $results->map(function ($item) {
+                return [
+                    $item->category?->name ?? 'Uncategorized',
+                    $item->total,
+                ];
+            })->toArray(),
+        ];
+    }
+
+    private function byYearReportData(): array
+    {
+        $results = Thesis::select('year_published', DB::raw('COUNT(*) as total'))
+            ->where('status', 'active')
+            ->groupBy('year_published')
+            ->orderByDesc('year_published')
+            ->get();
+
+        return [
+            'columns' => ['Year', 'Total Theses'],
+            'rows' => $results->map(function ($item) {
+                return [
+                    $item->year_published,
+                    $item->total,
+                ];
+            })->toArray(),
+        ];
+    }
+
+    private function mostSearchedReportData(): array
+    {
+        $results = AuditLog::where('action', 'search')
+            ->select('description', DB::raw('COUNT(*) as count'))
+            ->groupBy('description')
+            ->orderByDesc('count')
+            ->limit(10)
+            ->get();
+
+        return [
+            'columns' => ['Keyword', 'Search Count'],
+            'rows' => $results->map(function ($log) {
+                preg_match('/searched for: (.+)/', $log->description, $matches);
+                return [
+                    $matches[1] ?? $log->description,
+                    $log->count,
+                ];
+            })->toArray(),
+        ];
+    }
+
+    private function mostActiveUsersReportData(): array
+    {
+        $results = AuditLog::select('user_id', DB::raw('COUNT(*) as activity_count'))
+            ->whereNotNull('user_id')
+            ->groupBy('user_id')
+            ->orderByDesc('activity_count')
+            ->limit(10)
+            ->with('user:id,name,email,role')
+            ->get();
+
+        return [
+            'columns' => ['User', 'Email', 'Role', 'Activity Count'],
+            'rows' => $results->map(function ($item) {
+                return [
+                    $item->user?->name ?? 'Unknown',
+                    $item->user?->email ?? '-',
+                    $item->user?->role ?? '-',
+                    $item->activity_count,
+                ];
+            })->toArray(),
+        ];
+    }
+
+    private function peakHoursReportData(): array
+    {
+        $results = AuditLog::select(
+                DB::raw('HOUR(created_at) as hour'),
+                DB::raw('COUNT(*) as total')
+            )
+            ->groupBy('hour')
+            ->orderBy('hour')
+            ->get();
+
+        return [
+            'columns' => ['Hour', 'Total Activity'],
+            'rows' => $results->map(function ($item) {
+                return [
+                    sprintf('%02d:00', $item->hour),
+                    $item->total,
+                ];
+            })->toArray(),
+        ];
     }
 }
