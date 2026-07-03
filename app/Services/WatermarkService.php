@@ -2,13 +2,13 @@
 
 namespace App\Services;
 
-use setasign\Fpdi\Fpdi;
+use App\Services\Pdf\WatermarkPdf;
 
 class WatermarkService
 {
     public function stamp(string $absolutePath): string
     {
-        $pdf = new Fpdi();
+        $pdf = new WatermarkPdf();
         $pageCount = $pdf->setSourceFile($absolutePath);
 
         for ($i = 1; $i <= $pageCount; $i++) {
@@ -21,15 +21,15 @@ class WatermarkService
             $pdf->useTemplate($tplId);
 
             // Diagonal watermark
-            $pdf->SetFont('Helvetica', 'B', 36);
-            $pdf->SetTextColor(180, 180, 180); // light grey
-            $pdf->SetAlpha(0.25);              // 25% opacity
+            $pdf->SetFont('Helvetica', 'B', 45);
+            $pdf->SetTextColor(255, 0, 0);
+            $pdf->SetAlpha(0.3);              // 25% opacity
 
             // Rotate and center the text diagonally
             $pdf->StartTransform();
             $pdf->Rotate(45, $size['width'] / 2, $size['height'] / 2);
             $pdf->SetXY(0, $size['height'] / 2 - 10);
-            $pdf->Cell($size['width'], 20, 'TIPIGANAN — FOR VIEWING ONLY', 0, 0, 'C');
+            $pdf->Cell($size['width'], 20, 'TIPIGANAN - FOR VIEWING ONLY', 0, 0, 'C');
             $pdf->StopTransform();
 
             $pdf->SetAlpha(1); // reset
