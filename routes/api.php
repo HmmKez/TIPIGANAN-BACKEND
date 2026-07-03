@@ -40,12 +40,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/users',              [UserController::class, 'index']);
         Route::get('/users/{id}',         [UserController::class, 'show']);
         Route::get('/audit-logs',         [AuditLogController::class, 'index']);
-        Route::get('/audit-logs/{id}',    [AuditLogController::class, 'show']);
 
         Route::middleware('permission:export_reports')->group(function () {
             Route::get('/audit-logs/export', [AuditLogController::class, 'exportPdf']);
             Route::get('/reports/export', [ReportController::class, 'exportPdf']);
         });
+        
+        Route::get('/audit-logs/{id}',    [AuditLogController::class, 'show']);
 
         // Reports
         Route::prefix('reports')->group(function () {

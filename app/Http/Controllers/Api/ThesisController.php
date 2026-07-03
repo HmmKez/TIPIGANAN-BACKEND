@@ -10,6 +10,7 @@ use App\Models\Thesis;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use App\Jobs\ProcessThesisOcr;
+use Illuminate\Support\Facades\Storage;
 
 class ThesisController extends Controller
 {
@@ -101,16 +102,19 @@ class ThesisController extends Controller
         }
 
         $thesis = Thesis::findOrFail($signedToken->thesis_id);
-        $path   = storage_path('app/' . $thesis->file_path);
+        $path   = \Illuminate\Support\Facades\Storage::disk('local')->path($thesis->file_path);
 
         if (! file_exists($path)) {
             return response()->json(['message' => 'File not found.'], 404);
         }
 
-        return response()->file($path, [
+        $watermarked = (new \App\Services\WatermarkService())->stamp($path);
+
+        return response($watermarked, 200, [
             'Content-Type'        => 'application/pdf',
-            'Content-Disposition' => 'inline',
+            'Content-Disposition' => 'inline; filename="' . $thesis->title . '.pdf"',
             'Cache-Control'       => 'no-store, no-cache',
+            'Content-Length'      => strlen($watermarked),
         ]);
     }
 
