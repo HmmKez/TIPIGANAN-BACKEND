@@ -94,14 +94,23 @@ class UserController extends Controller
         return response()->json($user);
     }
 
-    // Super admin deletes a user
+    // Delete a user — super admin can delete anyone; staff granted
+    // delete_accounts can only delete students/teachers, never a peer
+    // staff account or a super admin.
     public function destroy(Request $request, $id)
     {
         $user = User::findOrFail($id);
+        $actor = $request->user();
 
-        if ($user->id === $request->user()->id) {
+        if ($user->id === $actor->id) {
             return response()->json([
                 'message' => 'You cannot delete your own account.'
+            ], 403);
+        }
+
+        if ($actor->role === 'staff' && in_array($user->role, ['staff', 'super_admin'])) {
+            return response()->json([
+                'message' => 'Staff can only delete student or teacher accounts.'
             ], 403);
         }
 
@@ -182,6 +191,12 @@ class UserController extends Controller
         ]);
 
         return response()->json(['message' => 'Password reset successfully.']);
+    }
+
+    // List all grantable permissions — super admin only, powers the grant/revoke UI
+    public function permissionsList()
+    {
+        return response()->json(Permission::all(['id', 'name']));
     }
 
     // Grant a specific permission to a staff member — super admin only

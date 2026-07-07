@@ -53,31 +53,37 @@ class ReportController extends Controller
     // Most searched keywords from audit logs
     public function mostSearched()
     {
+        // Grouping by the raw description would split identical keywords
+        // searched by different users into separate rows (the description
+        // includes the searcher's name). Extract the keyword first, then
+        // aggregate counts over the actual search term.
         $results = AuditLog::where('action', 'search')
-            ->select('description', DB::raw('COUNT(*) as count'))
-            ->groupBy('description')
-            ->orderByDesc('count')
-            ->limit(10)
-            ->get()
-            ->map(function ($log) {
-                // Extract the search term from the description
-                preg_match('/searched for: (.+)/', $log->description, $matches);
-                return [
-                    'keyword' => $matches[1] ?? $log->description,
-                    'count'   => $log->count,
-                ];
-            });
+            ->pluck('description')
+            ->map(function ($description) {
+                preg_match('/searched for: (.+)/', $description, $matches);
+                return $matches[1] ?? $description;
+            })
+            ->countBy()
+            ->sortDesc()
+            ->take(10)
+            ->map(fn ($count, $keyword) => ['keyword' => $keyword, 'count' => $count])
+            ->values();
 
         return response()->json($results);
     }
 
-    // Most active users
+    // Most active users — "hours active" is the count of distinct
+    // date+hour buckets in which a user had at least one logged action.
+    // There's no session-duration tracking in the schema (sessions here
+    // are stateless Sanctum tokens, not the sessions table), so this is
+    // the closest honest proxy for "time spent on the site" the audit
+    // trail can support.
     public function mostActiveUsers()
     {
-        $results = AuditLog::select('user_id', DB::raw('COUNT(*) as activity_count'))
+        $results = AuditLog::select('user_id', DB::raw("COUNT(DISTINCT DATE_FORMAT(created_at, '%Y-%m-%d %H')) as active_hours"))
             ->whereNotNull('user_id')
             ->groupBy('user_id')
-            ->orderByDesc('activity_count')
+            ->orderByDesc('active_hours')
             ->limit(10)
             ->with('user:id,name,email,role')
             ->get();
@@ -277,42 +283,39 @@ class ReportController extends Controller
     private function mostSearchedReportData(): array
     {
         $results = AuditLog::where('action', 'search')
-            ->select('description', DB::raw('COUNT(*) as count'))
-            ->groupBy('description')
-            ->orderByDesc('count')
-            ->limit(10)
-            ->get();
+            ->pluck('description')
+            ->map(function ($description) {
+                preg_match('/searched for: (.+)/', $description, $matches);
+                return $matches[1] ?? $description;
+            })
+            ->countBy()
+            ->sortDesc()
+            ->take(10);
 
         return [
             'columns' => ['Keyword', 'Search Count'],
-            'rows' => $results->map(function ($log) {
-                preg_match('/searched for: (.+)/', $log->description, $matches);
-                return [
-                    $matches[1] ?? $log->description,
-                    $log->count,
-                ];
-            })->toArray(),
+            'rows' => $results->map(fn ($count, $keyword) => [$keyword, $count])->values()->toArray(),
         ];
     }
 
     private function mostActiveUsersReportData(): array
     {
-        $results = AuditLog::select('user_id', DB::raw('COUNT(*) as activity_count'))
+        $results = AuditLog::select('user_id', DB::raw("COUNT(DISTINCT DATE_FORMAT(created_at, '%Y-%m-%d %H')) as active_hours"))
             ->whereNotNull('user_id')
             ->groupBy('user_id')
-            ->orderByDesc('activity_count')
+            ->orderByDesc('active_hours')
             ->limit(10)
             ->with('user:id,name,email,role')
             ->get();
 
         return [
-            'columns' => ['User', 'Email', 'Role', 'Activity Count'],
+            'columns' => ['User', 'Email', 'Role', 'Hours Active'],
             'rows' => $results->map(function ($item) {
                 return [
                     $item->user?->name ?? 'Unknown',
                     $item->user?->email ?? '-',
                     $item->user?->role ?? '-',
-                    $item->activity_count,
+                    $item->active_hours,
                 ];
             })->toArray(),
         ];

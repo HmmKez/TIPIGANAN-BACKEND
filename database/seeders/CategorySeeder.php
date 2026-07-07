@@ -28,7 +28,7 @@ class CategorySeeder extends Seeder
         foreach ($departments as $dept) {
             Category::firstOrCreate(
                 ['name' => $dept],
-                ['parent_id' => null, 'created_by' => $admin->id]
+                ['created_by' => $admin->id]
             );
         }
     }

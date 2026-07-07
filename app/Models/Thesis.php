@@ -64,4 +64,9 @@ class Thesis extends Model
     {
         return $this->hasMany(SignedUrlToken::class);
     }
+
+    public function reports()
+    {
+        return $this->hasMany(ThesisReport::class);
+    }
 }

@@ -20,35 +20,6 @@ class CitationController extends Controller
         return response()->json($citations);
     }
 
-    // Staff creates a custom citation for a thesis
-    public function store(Request $request, $thesisId)
-    {
-        $thesis = Thesis::findOrFail($thesisId);
-
-        $request->validate([
-            'format_type'   => 'required|in:APA,MLA',
-            'citation_text' => 'required|string',
-        ]);
-
-        $citation = Citation::create([
-            'thesis_id'     => $thesis->id,
-            'format_type'   => $request->format_type,
-            'citation_text' => $request->citation_text,
-            'created_by'    => $request->user()->id,
-        ]);
-
-        AuditLog::create([
-            'user_id'     => $request->user()->id,
-            'action'      => 'create_citation',
-            'target_type' => 'thesis',
-            'target_id'   => $thesis->id,
-            'description' => "{$request->user()->name} created {$request->format_type} citation for: {$thesis->title}",
-            'ip_address'  => $request->ip(),
-        ]);
-
-        return response()->json($citation, 201);
-    }
-
     // Auto-generate APA and MLA from thesis metadata
     public function generate($thesisId)
     {
@@ -59,23 +30,26 @@ class CitationController extends Controller
         $title   = $thesis->title;
         $school  = 'Mater Dei College';
 
-        $apa = "{$authors} ({$year}). {$title} [Unpublished thesis]. {$school}.";
-        $mla = "{$authors}. \"{$title}.\" Unpublished thesis, {$school}, {$year}.";
+        $defaultApa = "{$authors} ({$year}). {$title} [Unpublished thesis]. {$school}.";
+        $defaultMla = "{$authors}. \"{$title}.\" Unpublished thesis, {$school}, {$year}.";
 
-        // Save generated citations if they don't exist yet
-        Citation::firstOrCreate(
+        // firstOrCreate only inserts the default text the first time a
+        // format is requested — if staff have since customized the citation
+        // (created_by = staff id), that row already exists and its saved
+        // citation_text (not a freshly recomputed default) must win here.
+        $apaCitation = Citation::firstOrCreate(
             ['thesis_id' => $thesis->id, 'format_type' => 'APA'],
-            ['citation_text' => $apa, 'created_by' => null]
+            ['citation_text' => $defaultApa, 'created_by' => null]
         );
 
-        Citation::firstOrCreate(
+        $mlaCitation = Citation::firstOrCreate(
             ['thesis_id' => $thesis->id, 'format_type' => 'MLA'],
-            ['citation_text' => $mla, 'created_by' => null]
+            ['citation_text' => $defaultMla, 'created_by' => null]
         );
 
         return response()->json([
-            'APA' => $apa,
-            'MLA' => $mla,
+            'APA' => $apaCitation->citation_text,
+            'MLA' => $mlaCitation->citation_text,
         ]);
     }
 
@@ -96,7 +70,7 @@ class CitationController extends Controller
         return response()->json(['message' => 'Citation logged.']);
     }
 
-    // Update a custom citation
+    // Edit the text of the auto-generated APA or MLA citation
     public function update(Request $request, $thesisId, $citationId)
     {
         $citation = Citation::where('thesis_id', $thesisId)
@@ -106,7 +80,19 @@ class CitationController extends Controller
             'citation_text' => 'required|string',
         ]);
 
-        $citation->update(['citation_text' => $request->citation_text]);
+        $citation->update([
+            'citation_text' => $request->citation_text,
+            'created_by'    => $request->user()->id,
+        ]);
+
+        AuditLog::create([
+            'user_id'     => $request->user()->id,
+            'action'      => 'edit_citation',
+            'target_type' => 'thesis',
+            'target_id'   => $thesisId,
+            'description' => "{$request->user()->name} edited the {$citation->format_type} citation for thesis #{$thesisId}",
+            'ip_address'  => $request->ip(),
+        ]);
 
         return response()->json($citation);
     }

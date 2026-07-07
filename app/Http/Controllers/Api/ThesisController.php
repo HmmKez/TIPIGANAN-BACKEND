@@ -14,11 +14,49 @@ use Illuminate\Support\Facades\Storage;
 
 class ThesisController extends Controller
 {
+    // Syncs a thesis to the search index without letting a Meilisearch
+    // outage (e.g. cURL error 7, connection refused) fail the request —
+    // the database write already succeeded, so search sync is best-effort.
+    private function syncSearchable(Thesis $thesis): void
+    {
+        try {
+            $thesis->searchable();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Meilisearch sync failed, thesis saved to database only.', [
+                'thesis_id' => $thesis->id,
+                'error'     => $e->getMessage(),
+            ]);
+        }
+    }
+
+    // Same as syncSearchable, but for removing a thesis from the index.
+    private function syncUnsearchable(Thesis $thesis): void
+    {
+        try {
+            $thesis->unsearchable();
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Meilisearch unsearchable failed, thesis removed from database only.', [
+                'thesis_id' => $thesis->id,
+                'error'     => $e->getMessage(),
+            ]);
+        }
+    }
+
     // Public — guests can see the list but not open documents
     public function index(Request $request)
     {
+        // Restricted theses are visible to any logged-in user (student and
+        // up) but hidden from guests entirely; archived theses stay hidden
+        // from everyone unless explicitly requested via ?status=.
+        // This route has no auth:sanctum middleware, so the default guard
+        // stays 'web' — the 'sanctum' guard must be asked for explicitly.
+        $user = $request->user('sanctum');
+        $defaultStatuses = $user ? ['active', 'restricted'] : ['active'];
+
         $theses = Thesis::with('category', 'uploader')
-            ->where('status', 'active')
+            ->when($request->status,
+                fn($q) => $q->where('status', $request->status),
+                fn($q) => $q->whereIn('status', $defaultStatuses))
             ->when($request->category_id, fn($q) =>
                 $q->where('category_id', $request->category_id))
             ->when($request->year_published, fn($q) =>
@@ -32,29 +70,41 @@ class ThesisController extends Controller
     }
 
     // Public — basic info only, no file access
-    public function show($id)
+    public function show(Request $request, $id)
     {
+        // Same visibility rule as index(): restricted is visible to any
+        // logged-in user, hidden entirely from guests.
+        $user = $request->user('sanctum');
+        $visibleStatuses = $user ? ['active', 'restricted'] : ['active'];
+
         $thesis = Thesis::with('category', 'uploader', 'citations')
-            ->where('status', 'active')
+            ->whereIn('status', $visibleStatuses)
             ->findOrFail($id);
 
         // Related articles — same category, different thesis
         $related = Thesis::where('category_id', $thesis->category_id)
             ->where('id', '!=', $thesis->id)
-            ->where('status', 'active')
+            ->whereIn('status', $visibleStatuses)
             ->limit(5)
             ->get(['id', 'title', 'authors', 'year_published']);
 
         return response()->json([
-            'thesis'  => $thesis,
-            'related' => $related,
+            'thesis'         => $thesis,
+            'related'        => $related,
+            'view_count'     => ReadingHistory::where('thesis_id', $thesis->id)->count(),
+            'bookmark_count' => \App\Models\Favorite::where('thesis_id', $thesis->id)->count(),
+            'bookmarked'     => $user
+                ? \App\Models\Favorite::where('thesis_id', $thesis->id)->where('user_id', $user->id)->exists()
+                : false,
         ]);
     }
 
     // Protected — generates a signed URL for secure PDF viewing
     public function generateViewToken(Request $request, $id)
     {
-        $thesis = Thesis::where('status', 'active')->findOrFail($id);
+        // Any logged-in user can read a restricted thesis (that's what
+        // "restricted" means — hidden from guests, open to logged-in users).
+        $thesis = Thesis::whereIn('status', ['active', 'restricted'])->findOrFail($id);
 
         // Delete any existing token for this user + thesis
         SignedUrlToken::where('user_id', $request->user()->id)
@@ -145,7 +195,10 @@ class ThesisController extends Controller
                 ->store('covers', 'public');
         }
 
-        $thesis = Thesis::create([
+        // withoutSyncingToSearch prevents a Meilisearch connection attempt
+        // (and a possible cURL error 7) from happening inline with the DB
+        // write; syncSearchable() below retries it safely afterward.
+        $thesis = Thesis::withoutSyncingToSearch(fn () => Thesis::create([
             'title'           => $request->title,
             'authors'         => $request->authors,
             'adviser'         => $request->adviser,
@@ -158,7 +211,9 @@ class ThesisController extends Controller
             'cover_image_path'=> $coverPath,
             'status'          => 'active',
             'uploaded_by'     => $request->user()->id,
-        ]);
+        ]));
+
+        $this->syncSearchable($thesis);
 
         // Dispatch OCR job to run in background
         ProcessThesisOcr::dispatch($thesis);
@@ -192,11 +247,13 @@ class ThesisController extends Controller
             'status'         => 'sometimes|in:active,archived,restricted',
         ]);
 
-        $thesis->update($request->only([
+        Thesis::withoutSyncingToSearch(fn () => $thesis->update($request->only([
             'title', 'authors', 'adviser', 'abstract',
             'keywords', 'year_published', 'category_id',
             'pages', 'status',
-        ]));
+        ])));
+
+        $this->syncSearchable($thesis);
 
         AuditLog::create([
             'user_id'     => $request->user()->id,
@@ -214,7 +271,9 @@ class ThesisController extends Controller
     public function archive(Request $request, $id)
     {
         $thesis = Thesis::findOrFail($id);
-        $thesis->update(['status' => 'archived']);
+        // withoutSyncingToSearch prevents a Meilisearch connection attempt
+        // when Scout driver is meilisearch but the service isn't running locally.
+        Thesis::withoutSyncingToSearch(fn() => $thesis->update(['status' => 'archived']));
 
         AuditLog::create([
             'user_id'     => $request->user()->id,
@@ -226,6 +285,40 @@ class ThesisController extends Controller
         ]);
 
         return response()->json(['message' => 'Thesis archived successfully.']);
+    }
+
+    // Staff and above — unarchive, restrict, or remove a restriction.
+    // 'restricted' means visible to any logged-in user but hidden from
+    // guests; setting status back to 'active' un-restricts or unarchives.
+    public function updateStatus(Request $request, $id)
+    {
+        $request->validate([
+            'status' => 'required|in:active,archived,restricted',
+        ]);
+
+        $thesis = Thesis::findOrFail($id);
+        $newStatus = $request->status;
+        $previousStatus = $thesis->status;
+
+        Thesis::withoutSyncingToSearch(fn () => $thesis->update(['status' => $newStatus]));
+        $this->syncSearchable($thesis);
+
+        $actionLabel = match ($newStatus) {
+            'archived'   => 'archived',
+            'restricted' => 'restricted',
+            'active'     => $previousStatus === 'archived' ? 'restored' : 'unrestricted',
+        };
+
+        AuditLog::create([
+            'user_id'     => $request->user()->id,
+            'action'      => 'update_thesis_status',
+            'target_type' => 'thesis',
+            'target_id'   => $thesis->id,
+            'description' => "{$request->user()->name} {$actionLabel} thesis: {$thesis->title}",
+            'ip_address'  => $request->ip(),
+        ]);
+
+        return response()->json($thesis);
     }
 
     // Super admin only — hard delete (soft delete)
@@ -242,7 +335,11 @@ class ThesisController extends Controller
             'ip_address'  => $request->ip(),
         ]);
 
-        $thesis->delete();
+        // withoutSyncingToSearch prevents a Meilisearch connection attempt
+        // (cURL error 7) from happening inline with the DB delete;
+        // syncUnsearchable() below retries it safely afterward.
+        Thesis::withoutSyncingToSearch(fn () => $thesis->delete());
+        $this->syncUnsearchable($thesis);
 
         return response()->json(['message' => 'Thesis deleted successfully.']);
     }

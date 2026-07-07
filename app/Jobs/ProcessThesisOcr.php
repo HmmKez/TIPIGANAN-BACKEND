@@ -10,6 +10,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProcessThesisOcr implements ShouldQueue
 {
@@ -36,14 +37,23 @@ class ProcessThesisOcr implements ShouldQueue
             )
         )));
 
-        // Update the thesis with extracted content
-        $this->thesis->update([
-            'keywords' => $mergedKeywords,
-            'abstract' => $this->thesis->abstract ?: $extracted['abstract'],
-        ]);
+        // QUEUE_CONNECTION=sync means this job runs inline with the upload
+        // request — an unguarded Meilisearch call here (cURL error 7 when
+        // it's offline) would fail the whole request even though OCR and
+        // the DB write already succeeded. Same safe pattern as the
+        // controller: skip the automatic sync, then retry it best-effort.
+        Thesis::withoutSyncingToSearch(function () use ($mergedKeywords, $extracted) {
+            $this->thesis->update([
+                'keywords' => $mergedKeywords,
+                'abstract' => $this->thesis->abstract ?: $extracted['abstract'],
+            ]);
+        });
 
-        // Store the full extracted text for search indexing
-        $this->thesis->searchable(); // re-index in Scout
+        try {
+            $this->thesis->searchable();
+        } catch (Throwable $e) {
+            Log::warning("OCR: Meilisearch sync failed for thesis ID {$this->thesis->id}: " . $e->getMessage());
+        }
 
         Log::info("OCR: Completed for thesis ID {$this->thesis->id} using method: {$extracted['method']}");
     }

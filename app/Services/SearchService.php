@@ -11,26 +11,30 @@ class SearchService
 {
     protected int $timeout = 2;
 
-    public function search(string $query, array $filters = [])
+    // $includeRestricted: restricted theses are visible to any logged-in
+    // user but hidden from guests entirely — same rule as browsing.
+    public function search(string $query, array $filters = [], bool $includeRestricted = false)
     {
         try {
-            return $this->searchWithMeilisearch($query, $filters);
+            return $this->searchWithMeilisearch($query, $filters, $includeRestricted);
         } catch (Exception $e) {
             Log::warning('Meilisearch unavailable, falling back to database search.', [
                 'query' => $query,
                 'error' => $e->getMessage(),
             ]);
 
-            return $this->searchWithDatabase($query, $filters);
+            return $this->searchWithDatabase($query, $filters, $includeRestricted);
         }
     }
 
-    protected function searchWithMeilisearch(string $query, array $filters = [])
+    protected function searchWithMeilisearch(string $query, array $filters = [], bool $includeRestricted = false)
     {
         $this->pingMeilisearch();
 
+        $statuses = $includeRestricted ? ['active', 'restricted'] : ['active'];
+
         $builder = Thesis::search($query)
-            ->where('status', 'active');
+            ->whereIn('status', $statuses);
 
         if (!empty($filters['category_id'])) {
             $builder->where('category_id', (int) $filters['category_id']);
@@ -53,10 +57,12 @@ class SearchService
         }
     }
 
-    protected function searchWithDatabase(string $query, array $filters = [])
+    protected function searchWithDatabase(string $query, array $filters = [], bool $includeRestricted = false)
     {
+        $statuses = $includeRestricted ? ['active', 'restricted'] : ['active'];
+
         $builder = Thesis::query()
-            ->where('status', 'active')
+            ->whereIn('status', $statuses)
             ->where(function ($q) use ($query) {
                 $q->where('title',    'LIKE', "%{$query}%")
                   ->orWhere('authors',  'LIKE', "%{$query}%")

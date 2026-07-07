@@ -17,7 +17,7 @@ class PermissionSeeder extends Seeder
         $permissions = [
             'delete_documents',
             'delete_accounts',
-            'manage_users',
+            'reset_passwords',
             'manage_categories',
             'upload_thesis',
             'edit_thesis',
@@ -40,8 +40,12 @@ class PermissionSeeder extends Seeder
         // Super admin gets everything
         $superAdmin->givePermissionTo(Permission::all());
 
-        // Staff gets default permissions (no delete by default)
+        // Staff gets every permission except deleting — per the team guide,
+        // "Delete user accounts" and "Delete documents" specifically require
+        // a Super Admin grant; everything else, including viewing user
+        // accounts and resetting passwords, is a baseline staff privilege.
         $staff->givePermissionTo([
+            'reset_passwords',
             'upload_thesis',
             'edit_thesis',
             'archive_thesis',
@@ -54,5 +58,13 @@ class PermissionSeeder extends Seeder
         // Students and teachers — read only, no special permissions
         $student->givePermissionTo([]);
         $teacher->givePermissionTo([]);
+
+        // Cleanup: 'manage_users' was a short-lived permission from an
+        // earlier iteration that never actually gated anything — replaced
+        // by the more specific 'reset_passwords' above.
+        if ($stale = Permission::where('name', 'manage_users')->first()) {
+            $staff->revokePermissionTo($stale);
+            $stale->delete();
+        }
     }
 }
