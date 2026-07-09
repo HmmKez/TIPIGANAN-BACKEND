@@ -6,6 +6,7 @@ use App\Models\AuditLog;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 class AuditLogExportTest extends TestCase
@@ -25,8 +26,13 @@ class AuditLogExportTest extends TestCase
     public function test_users_with_export_permission_can_download_the_audit_log_pdf_with_filters(): void
     {
         Permission::findOrCreate('export_reports');
+        Role::findOrCreate('staff');
 
-        $user = User::factory()->create();
+        // The export route sits behind role:staff|super_admin *and*
+        // permission:export_reports — granting only the permission isn't
+        // enough to pass the outer role gate.
+        $user = User::factory()->create(['role' => 'staff']);
+        $user->assignRole('staff');
         $user->givePermissionTo('export_reports');
 
         AuditLog::create([
