@@ -81,12 +81,7 @@ class ThesisController extends Controller
             ->whereIn('status', $visibleStatuses)
             ->findOrFail($id);
 
-        // Related articles — same category, different thesis
-        $related = Thesis::where('category_id', $thesis->category_id)
-            ->where('id', '!=', $thesis->id)
-            ->whereIn('status', $visibleStatuses)
-            ->limit(5)
-            ->get(['id', 'title', 'authors', 'year_published']);
+        $related = $this->findRelatedTheses($thesis, $visibleStatuses);
 
         return response()->json([
             'thesis'         => $thesis,
@@ -97,6 +92,66 @@ class ThesisController extends Controller
                 ? \App\Models\Favorite::where('thesis_id', $thesis->id)->where('user_id', $user->id)->exists()
                 : false,
         ]);
+    }
+
+    // Ranks candidate theses by actual content overlap (keywords, then
+    // abstract) instead of just "same category, whatever order the DB
+    // returns them in". Same-category theses are still included as a
+    // baseline (score 1) even with zero keyword/abstract overlap, so this
+    // never regresses to showing nothing — it just ranks genuinely similar
+    // theses above merely same-department ones instead of treating them
+    // the same.
+    private function findRelatedTheses(Thesis $thesis, array $visibleStatuses)
+    {
+        // A handful of theses seeded during earlier testing have corrupted
+        // `keywords` (raw OCR text blobs instead of a short comma-separated
+        // list). Cap term length so a real keyword phrase still matches
+        // while a paragraph-sized "term" can't turn into a slow, useless
+        // LIKE '%...%' pattern that will never match anything anyway.
+        $terms = collect(explode(',', $thesis->keywords ?? ''))
+            ->map(fn ($k) => trim($k))
+            ->filter(fn ($k) => $k !== '' && strlen($k) <= 60)
+            ->values();
+
+        $candidates = Thesis::where('id', '!=', $thesis->id)
+            ->whereIn('status', $visibleStatuses)
+            ->where(function ($q) use ($thesis, $terms) {
+                $q->where('category_id', $thesis->category_id);
+                foreach ($terms as $term) {
+                    $q->orWhere('keywords', 'LIKE', "%{$term}%")
+                      ->orWhere('abstract', 'LIKE', "%{$term}%");
+                }
+            })
+            ->get(['id', 'title', 'authors', 'year_published', 'category_id', 'keywords', 'abstract']);
+
+        return $candidates
+            ->map(function ($t) use ($thesis, $terms) {
+                $score = $t->category_id === $thesis->category_id ? 1 : 0;
+                $candidateKeywords = strtolower($t->keywords ?? '');
+                $candidateAbstract = strtolower($t->abstract ?? '');
+
+                foreach ($terms as $term) {
+                    $term = strtolower($term);
+                    if (str_contains($candidateKeywords, $term)) {
+                        $score += 3;
+                    }
+                    if (str_contains($candidateAbstract, $term)) {
+                        $score += 1;
+                    }
+                }
+
+                $t->relevance_score = $score;
+                return $t;
+            })
+            ->sortByDesc('relevance_score')
+            ->take(5)
+            ->values()
+            ->map(fn ($t) => [
+                'id'             => $t->id,
+                'title'          => $t->title,
+                'authors'        => $t->authors,
+                'year_published' => $t->year_published,
+            ]);
     }
 
     // Protected — generates a signed URL for secure PDF viewing
