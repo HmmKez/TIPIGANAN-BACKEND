@@ -7,67 +7,169 @@ use App\Models\AuditLog;
 use App\Models\CitationLog;
 use App\Models\Thesis;
 use App\Models\User;
+use App\Support\SafeCache;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 class ReportController extends Controller
 {
-    // Most cited theses
-    public function mostCited()
+    // These are all expensive GROUP BY aggregates over audit_logs/citation_logs
+    // (tables that only grow), viewed on a staff-only dashboard that doesn't
+    // need up-to-the-second freshness. A few minutes of staleness is a fine
+    // trade for not re-running the aggregation on every page view.
+    private const TTL = 300;
+
+    // Reports driven by user activity (citations, searches, sessions) can be
+    // narrowed to student-only, teacher-only, or both, plus a date range.
+    // Reports about the theses themselves (by-department, by-year) and the
+    // top-level dashboard totals aren't user-activity reports, so no filter
+    // applies to those.
+    private function parseFilters(Request $request): array
     {
-        $results = CitationLog::select('thesis_id', DB::raw('COUNT(*) as citation_count'))
+        $roles = collect(explode(',', (string) $request->input('roles', '')))
+            ->map(fn ($r) => trim($r))
+            ->filter(fn ($r) => in_array($r, ['student', 'teacher'], true))
+            ->values()
+            ->all();
+
+        return [
+            'roles'     => $roles,
+            'date_from' => $request->input('date_from'),
+            'date_to'   => $request->input('date_to'),
+        ];
+    }
+
+    private function filterSignature(array $filters): string
+    {
+        return md5(json_encode($filters));
+    }
+
+    private function filterSubtitle(array $filters): string
+    {
+        $parts = [];
+        if (! empty($filters['roles'])) {
+            $parts[] = 'Role: ' . implode(', ', array_map('ucfirst', $filters['roles']));
+        }
+        if ($filters['date_from'] || $filters['date_to']) {
+            $parts[] = 'Date: ' . $this->formatDateRange($filters['date_from'], $filters['date_to']);
+        }
+
+        return $parts ? implode(' | ', $parts) : 'Generated report';
+    }
+
+    private function mostCitedQuery(array $filters)
+    {
+        return CitationLog::query()
+            ->when($filters['roles'], fn ($q, $roles) =>
+                $q->whereHas('user', fn ($q2) => $q2->whereIn('role', $roles)))
+            ->when($filters['date_from'], fn ($q, $d) => $q->whereDate('cited_at', '>=', $d))
+            ->when($filters['date_to'], fn ($q, $d) => $q->whereDate('cited_at', '<=', $d))
+            ->select('thesis_id', DB::raw('COUNT(*) as citation_count'))
             ->groupBy('thesis_id')
             ->orderByDesc('citation_count')
             ->limit(10)
-            ->with('thesis:id,title,authors,year_published,category_id')
-            ->get();
+            ->with('thesis:id,title,authors,year_published,category_id');
+    }
+
+    private function mostSearchedQuery(array $filters)
+    {
+        return AuditLog::where('action', 'search')
+            ->when($filters['roles'], fn ($q, $roles) =>
+                $q->whereHas('user', fn ($q2) => $q2->whereIn('role', $roles)))
+            ->when($filters['date_from'], fn ($q, $d) => $q->whereDate('created_at', '>=', $d))
+            ->when($filters['date_to'], fn ($q, $d) => $q->whereDate('created_at', '<=', $d));
+    }
+
+    private function mostActiveUsersQuery(array $filters)
+    {
+        return AuditLog::select('user_id', DB::raw("COUNT(DISTINCT DATE_FORMAT(created_at, '%Y-%m-%d %H')) as active_hours"))
+            ->whereNotNull('user_id')
+            ->when($filters['roles'], fn ($q, $roles) =>
+                $q->whereHas('user', fn ($q2) => $q2->whereIn('role', $roles)))
+            ->when($filters['date_from'], fn ($q, $d) => $q->whereDate('created_at', '>=', $d))
+            ->when($filters['date_to'], fn ($q, $d) => $q->whereDate('created_at', '<=', $d))
+            ->groupBy('user_id')
+            ->orderByDesc('active_hours')
+            ->limit(10)
+            ->with('user:id,name,email,role');
+    }
+
+    private function peakHoursQuery(array $filters)
+    {
+        return AuditLog::select(
+                DB::raw('HOUR(created_at) as hour'),
+                DB::raw('COUNT(*) as total')
+            )
+            ->when($filters['roles'], fn ($q, $roles) =>
+                $q->whereHas('user', fn ($q2) => $q2->whereIn('role', $roles)))
+            ->when($filters['date_from'], fn ($q, $d) => $q->whereDate('created_at', '>=', $d))
+            ->when($filters['date_to'], fn ($q, $d) => $q->whereDate('created_at', '<=', $d))
+            ->groupBy('hour')
+            ->orderBy('hour');
+    }
+
+    // Most cited theses
+    public function mostCited(Request $request)
+    {
+        $filters = $this->parseFilters($request);
+
+        $results = SafeCache::remember('reports:most-cited:' . $this->filterSignature($filters), self::TTL,
+            fn () => $this->mostCitedQuery($filters)->get());
 
         return response()->json($results);
     }
 
-    // Theses count by department/category
+    // Theses count by department/category — not a user-activity report, no role/date filter
     public function byDepartment()
     {
-        $results = Thesis::select('category_id', DB::raw('COUNT(*) as total'))
-            ->where('status', 'active')
-            ->groupBy('category_id')
-            ->with('category:id,name')
-            ->get();
+        $results = SafeCache::remember('reports:by-department', self::TTL, fn () =>
+            Thesis::select('category_id', DB::raw('COUNT(*) as total'))
+                ->where('status', 'active')
+                ->groupBy('category_id')
+                ->with('category:id,name')
+                ->get()
+        );
 
         return response()->json($results);
     }
 
-    // Theses count by year
+    // Theses count by year — not a user-activity report, no role/date filter
     public function byYear()
     {
-        $results = Thesis::select('year_published', DB::raw('COUNT(*) as total'))
-            ->where('status', 'active')
-            ->groupBy('year_published')
-            ->orderByDesc('year_published')
-            ->get();
+        $results = SafeCache::remember('reports:by-year', self::TTL, fn () =>
+            Thesis::select('year_published', DB::raw('COUNT(*) as total'))
+                ->where('status', 'active')
+                ->groupBy('year_published')
+                ->orderByDesc('year_published')
+                ->get()
+        );
 
         return response()->json($results);
     }
 
     // Most searched keywords from audit logs
-    public function mostSearched()
+    public function mostSearched(Request $request)
     {
+        $filters = $this->parseFilters($request);
+
         // Grouping by the raw description would split identical keywords
         // searched by different users into separate rows (the description
         // includes the searcher's name). Extract the keyword first, then
         // aggregate counts over the actual search term.
-        $results = AuditLog::where('action', 'search')
-            ->pluck('description')
-            ->map(function ($description) {
-                preg_match('/searched for: (.+)/', $description, $matches);
-                return $matches[1] ?? $description;
-            })
-            ->countBy()
-            ->sortDesc()
-            ->take(10)
-            ->map(fn ($count, $keyword) => ['keyword' => $keyword, 'count' => $count])
-            ->values();
+        $results = SafeCache::remember('reports:most-searched:' . $this->filterSignature($filters), self::TTL, fn () =>
+            $this->mostSearchedQuery($filters)
+                ->pluck('description')
+                ->map(function ($description) {
+                    preg_match('/searched for: (.+)/', $description, $matches);
+                    return $matches[1] ?? $description;
+                })
+                ->countBy()
+                ->sortDesc()
+                ->take(10)
+                ->map(fn ($count, $keyword) => ['keyword' => $keyword, 'count' => $count])
+                ->values()
+        );
 
         return response()->json($results);
     }
@@ -78,37 +180,31 @@ class ReportController extends Controller
     // are stateless Sanctum tokens, not the sessions table), so this is
     // the closest honest proxy for "time spent on the site" the audit
     // trail can support.
-    public function mostActiveUsers()
+    public function mostActiveUsers(Request $request)
     {
-        $results = AuditLog::select('user_id', DB::raw("COUNT(DISTINCT DATE_FORMAT(created_at, '%Y-%m-%d %H')) as active_hours"))
-            ->whereNotNull('user_id')
-            ->groupBy('user_id')
-            ->orderByDesc('active_hours')
-            ->limit(10)
-            ->with('user:id,name,email,role')
-            ->get();
+        $filters = $this->parseFilters($request);
+
+        $results = SafeCache::remember('reports:most-active:' . $this->filterSignature($filters), self::TTL,
+            fn () => $this->mostActiveUsersQuery($filters)->get());
 
         return response()->json($results);
     }
 
     // Peak usage hours
-    public function peakHours()
+    public function peakHours(Request $request)
     {
-        $results = AuditLog::select(
-                DB::raw('HOUR(created_at) as hour'),
-                DB::raw('COUNT(*) as total')
-            )
-            ->groupBy('hour')
-            ->orderBy('hour')
-            ->get();
+        $filters = $this->parseFilters($request);
+
+        $results = SafeCache::remember('reports:peak-hours:' . $this->filterSignature($filters), self::TTL,
+            fn () => $this->peakHoursQuery($filters)->get());
 
         return response()->json($results);
     }
 
-    // Full dashboard summary
+    // Full dashboard summary — top-level totals, not filtered by role/date
     public function dashboard()
     {
-        return response()->json([
+        $data = SafeCache::remember('reports:dashboard', self::TTL, fn () => [
             'total_theses'     => Thesis::where('status', 'active')->count(),
             'total_users'      => User::count(),
             'total_citations'  => CitationLog::count(),
@@ -125,14 +221,17 @@ class ReportController extends Controller
                                     ->with('thesis:id,title,authors')
                                     ->get(),
         ]);
+
+        return response()->json($data);
     }
 
     public function exportPdf(Request $request)
     {
         $request->validate([
-            'report' => ['required', 'in:dashboard,most-cited,by-department,by-year,most-searched,most-active,peak-hours'],
+            'report'    => ['required', 'in:dashboard,most-cited,by-department,by-year,most-searched,most-active,peak-hours'],
             'date_from' => ['nullable', 'date'],
-            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'date_to'   => ['nullable', 'date', 'after_or_equal:date_from'],
+            'roles'     => ['nullable', 'string'],
         ]);
 
         $user = $request->user();
@@ -142,17 +241,16 @@ class ReportController extends Controller
         }
 
         $reportType = $request->input('report');
-        $dateFrom = $request->input('date_from');
-        $dateTo = $request->input('date_to');
+        $filters = $this->parseFilters($request);
         $reportTitle = $this->reportTitle($reportType);
 
-        $data = $this->collectReportData($reportType, $dateFrom, $dateTo);
+        $data = $this->collectReportData($reportType, $filters);
 
         $pdf = Pdf::loadView('pdf.pdf_report', [
             'title' => $reportTitle,
-            'subtitle' => 'Generated report',
+            'subtitle' => $this->filterSubtitle($filters),
             'generatedAt' => now()->format('Y-m-d H:i:s'),
-            'dateRange' => $this->formatDateRange($dateFrom, $dateTo),
+            'dateRange' => $this->formatDateRange($filters['date_from'], $filters['date_to']),
             'columns' => $data['columns'],
             'rows' => $data['rows'],
         ])->setPaper('a4', 'portrait');
@@ -174,16 +272,16 @@ class ReportController extends Controller
         };
     }
 
-    private function collectReportData(string $reportType, ?string $dateFrom, ?string $dateTo): array
+    private function collectReportData(string $reportType, array $filters): array
     {
         return match ($reportType) {
             'dashboard' => $this->dashboardReportData(),
-            'most-cited' => $this->mostCitedReportData(),
+            'most-cited' => $this->mostCitedReportData($filters),
             'by-department' => $this->byDepartmentReportData(),
             'by-year' => $this->byYearReportData(),
-            'most-searched' => $this->mostSearchedReportData(),
-            'most-active' => $this->mostActiveUsersReportData(),
-            'peak-hours' => $this->peakHoursReportData(),
+            'most-searched' => $this->mostSearchedReportData($filters),
+            'most-active' => $this->mostActiveUsersReportData($filters),
+            'peak-hours' => $this->peakHoursReportData($filters),
             default => ['columns' => [], 'rows' => []],
         };
     }
@@ -220,14 +318,9 @@ class ReportController extends Controller
         ];
     }
 
-    private function mostCitedReportData(): array
+    private function mostCitedReportData(array $filters): array
     {
-        $results = CitationLog::select('thesis_id', DB::raw('COUNT(*) as citation_count'))
-            ->groupBy('thesis_id')
-            ->orderByDesc('citation_count')
-            ->limit(10)
-            ->with('thesis:id,title,authors,year_published,category_id')
-            ->get();
+        $results = $this->mostCitedQuery($filters)->get();
 
         return [
             'columns' => ['Thesis', 'Authors', 'Year', 'Citation Count'],
@@ -280,9 +373,9 @@ class ReportController extends Controller
         ];
     }
 
-    private function mostSearchedReportData(): array
+    private function mostSearchedReportData(array $filters): array
     {
-        $results = AuditLog::where('action', 'search')
+        $results = $this->mostSearchedQuery($filters)
             ->pluck('description')
             ->map(function ($description) {
                 preg_match('/searched for: (.+)/', $description, $matches);
@@ -298,15 +391,9 @@ class ReportController extends Controller
         ];
     }
 
-    private function mostActiveUsersReportData(): array
+    private function mostActiveUsersReportData(array $filters): array
     {
-        $results = AuditLog::select('user_id', DB::raw("COUNT(DISTINCT DATE_FORMAT(created_at, '%Y-%m-%d %H')) as active_hours"))
-            ->whereNotNull('user_id')
-            ->groupBy('user_id')
-            ->orderByDesc('active_hours')
-            ->limit(10)
-            ->with('user:id,name,email,role')
-            ->get();
+        $results = $this->mostActiveUsersQuery($filters)->get();
 
         return [
             'columns' => ['User', 'Email', 'Role', 'Hours Active'],
@@ -321,15 +408,9 @@ class ReportController extends Controller
         ];
     }
 
-    private function peakHoursReportData(): array
+    private function peakHoursReportData(array $filters): array
     {
-        $results = AuditLog::select(
-                DB::raw('HOUR(created_at) as hour'),
-                DB::raw('COUNT(*) as total')
-            )
-            ->groupBy('hour')
-            ->orderBy('hour')
-            ->get();
+        $results = $this->peakHoursQuery($filters)->get();
 
         return [
             'columns' => ['Hour', 'Total Activity'],
