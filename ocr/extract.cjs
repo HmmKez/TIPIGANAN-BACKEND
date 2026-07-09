@@ -1,6 +1,7 @@
 const fs = require('fs');
+const path = require('path');
+const { execFileSync } = require('child_process');
 const { PDFParse } = require('pdf-parse');
-const Tesseract = require('tesseract.js');
 
 const filePath = process.argv[2];
 
@@ -12,7 +13,18 @@ if (!filePath || !fs.existsSync(filePath)) {
 async function parsePdfText(buffer) {
     const parser = new PDFParse({ data: buffer });
     const result = await parser.getText();
-    return result.text || '';
+    return stripPageMarkers(result.text || '');
+}
+
+// pdf-parse inserts a "-- N of M --" separator between every page's text
+// regardless of whether that page actually contains any real text. On a
+// genuinely scanned multi-page PDF (no real text anywhere), these markers
+// alone add up to well over the 100-char "has real text" threshold once a
+// document is ~7+ pages long — silently misclassifying it as a digital PDF
+// and skipping OCR entirely, with no error and no extracted content. Strip
+// them before measuring/using the text at all.
+function stripPageMarkers(text) {
+    return text.replace(/(^|\n)\s*--\s*\d+\s*of\s*\d+\s*--\s*(?=\n|$)/g, '\n');
 }
 
 function normalizeLine(line) {
@@ -177,10 +189,21 @@ async function extractFromDigitalPdf(text) {
     return { title, abstract, introduction, keywords, conclusion, method: 'digital' };
 }
 
+// Tesseract.js has no PDF parser (Leptonica only reads raster images), so a
+// scanned/image-only PDF has to be rasterized to page images first. That
+// rasterization (rasterize-ocr.cjs) runs in its own child process — see the
+// comment in that file for why it can't share this process.
 async function extractFromScannedPdf(filePath) {
-    const { data: { text } } = await Tesseract.recognize(filePath, 'eng', {
-        logger: () => {}
+    const scriptPath = path.join(__dirname, 'rasterize-ocr.cjs');
+    const raw = execFileSync('node', [scriptPath, filePath], {
+        encoding: 'utf8',
+        maxBuffer: 20 * 1024 * 1024,
     });
+
+    const { text = '', error, pagesProcessed = 0, totalPages = 0 } = JSON.parse(raw);
+    if (error) {
+        throw new Error(`OCR rasterization failed: ${error}`);
+    }
 
     const lines = text.split('\n');
     const title = extractTitle(lines);
@@ -204,7 +227,10 @@ async function extractFromScannedPdf(filePath) {
         60
     );
 
-    return { title, abstract, introduction: '', keywords, conclusion, method: 'ocr' };
+    return {
+        title, abstract, introduction: '', keywords, conclusion, method: 'ocr',
+        pagesProcessed, totalPages,
+    };
 }
 
 async function run() {

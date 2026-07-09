@@ -45,10 +45,21 @@ class ThesisSeeder extends Seeder
         ];
 
         foreach ($theses as $thesis) {
-            Thesis::firstOrCreate(
+            // withoutSyncingToSearch prevents a Meilisearch connection
+            // attempt (cURL error 7) from crashing the whole seed run when
+            // Meilisearch isn't running locally — same safe pattern used in
+            // ThesisController. Meilisearch is optional; `migrate --seed`
+            // must succeed without it.
+            $created = Thesis::withoutSyncingToSearch(fn () => Thesis::firstOrCreate(
                 ['title' => $thesis['title']],
                 $thesis
-            );
+            ));
+
+            try {
+                $created->searchable();
+            } catch (\Throwable $e) {
+                // Best-effort — search indexing isn't required for seeding to succeed.
+            }
         }
     }
 }

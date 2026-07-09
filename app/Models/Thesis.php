@@ -27,6 +27,12 @@ class Thesis extends Model
             'keywords'       => $this->keywords,
             'year_published' => $this->year_published,
             'category_id'    => $this->category_id,
+            // Without this, SearchService's whereIn('status', [...]) filter
+            // matches nothing at all (the field doesn't exist on any
+            // document), so every Meilisearch-backed search silently
+            // returns zero results — Meilisearch still responds 200 OK,
+            // so the exception-based MySQL fallback never kicks in either.
+            'status'         => $this->status,
         ];
     }
 

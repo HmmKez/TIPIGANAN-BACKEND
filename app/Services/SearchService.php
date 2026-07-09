@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Thesis;
+use App\Support\SafeCache;
 use Exception;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -47,12 +48,26 @@ class SearchService
         return $builder->paginate(12);
     }
 
+    // Without caching, this health check runs on *every single search* —
+    // when Meilisearch is offline that's a full 2-second timeout tax per
+    // request before falling back to MySQL. Cache the result (both "up"
+    // and "down") for a short window so only one request per 15 seconds
+    // actually pays that cost; everyone else reads the cached verdict
+    // from Redis in under a millisecond.
     protected function pingMeilisearch(): void
     {
-        $response = Http::timeout($this->timeout)
-            ->get(config('scout.meilisearch.host') . '/health');
+        $isAvailable = SafeCache::remember('meilisearch:health', 15, function () {
+            try {
+                $response = Http::timeout($this->timeout)
+                    ->get(config('scout.meilisearch.host') . '/health');
 
-        if (!$response->successful() || $response->json('status') !== 'available') {
+                return $response->successful() && $response->json('status') === 'available';
+            } catch (\Throwable $e) {
+                return false;
+            }
+        });
+
+        if (!$isAvailable) {
             throw new Exception('Meilisearch health check failed.');
         }
     }
