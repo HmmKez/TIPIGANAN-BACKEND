@@ -5,15 +5,25 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Category;
+use App\Support\SafeCache;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class CategoryController extends Controller
 {
-    // Anyone can view categories including guests
+    private const CACHE_KEY = 'categories:index';
+
+    // Anyone can view categories including guests — this is queried on
+    // nearly every page (browse, dashboard, upload form), so it's worth
+    // caching. Category edits below clear it immediately; the thesis
+    // count can lag up to 5 minutes if a thesis elsewhere changes category
+    // (acceptable staleness for a display count, not worth invalidating
+    // from ThesisController on every write).
     public function index()
     {
-        $categories = Category::withCount('theses')->get();
+        $categories = SafeCache::remember(self::CACHE_KEY, 300, function () {
+            return Category::withCount('theses')->get();
+        });
 
         return response()->json($categories);
     }
@@ -45,6 +55,8 @@ class CategoryController extends Controller
             'ip_address'  => $request->ip(),
         ]);
 
+        SafeCache::forget(self::CACHE_KEY);
+
         return response()->json($category, 201);
     }
 
@@ -68,6 +80,8 @@ class CategoryController extends Controller
             'description' => "{$request->user()->name} updated category {$category->name}",
             'ip_address'  => $request->ip(),
         ]);
+
+        SafeCache::forget(self::CACHE_KEY);
 
         return response()->json($category);
     }
@@ -98,6 +112,8 @@ class CategoryController extends Controller
             'ip_address'  => $request->ip(),
         ]);
 
+        SafeCache::forget(self::CACHE_KEY);
+
         return response()->json($category);
     }
 
@@ -125,6 +141,8 @@ class CategoryController extends Controller
         }
 
         $category->delete();
+
+        SafeCache::forget(self::CACHE_KEY);
 
         return response()->json(['message' => 'Category deleted successfully.']);
     }

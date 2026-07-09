@@ -214,6 +214,18 @@ return [
          * file. Using 'default' here means to use the `default` set in cache.php.
          */
 
-        'store' => 'default',
+        // Defaults to 'file' instead of 'default' (redis) — this package's
+        // own cache calls aren't wrapped by our SafeCache fallback, so when
+        // Redis/Memurai isn't running, every permission check (any
+        // `permission:` middleware, any hasPermissionTo() call) throws an
+        // uncaught connection error instead of degrading gracefully. File
+        // cache has no external dependency and permission data changes
+        // rarely, so there's no real downside to leaving this off Redis.
+        //
+        // A separate env var (not CACHE_STORE) so phpunit.xml can still pin
+        // this to 'array' for test isolation — a hardcoded 'file' value here
+        // would leak permission cache state across test runs via disk,
+        // since phpunit.xml's CACHE_STORE=array override wouldn't reach it.
+        'store' => env('PERMISSION_CACHE_STORE', 'file'),
     ],
 ];
