@@ -89,6 +89,52 @@ API runs at `http://localhost:8000`
     php artisan serve
     ```
 
+## Optional: Meilisearch (better search)
+
+The app works fine without this — search automatically falls back to a plain MySQL query. Meilisearch adds typo-tolerance and relevance ranking on top. Skip this section entirely unless you want that.
+
+1. Download the latest Windows binary from [github.com/meilisearch/meilisearch/releases](https://github.com/meilisearch/meilisearch/releases) (look for `meilisearch-windows-amd64.exe`) and save it somewhere permanent, e.g. `C:\meilisearch\meilisearch.exe`.
+2. Run it (no install needed, it's a single executable):
+   ```powershell
+   C:\meilisearch\meilisearch.exe --http-addr 127.0.0.1:7700 --no-analytics
+   ```
+   Keep this running in its own terminal window, or set it up to run at login (any "run this at startup" method works — a shortcut in `shell:startup`, Task Scheduler, etc.).
+3. In your `.env`, make sure these are set (they're already the defaults in `.env.example`):
+   ```env
+   SCOUT_DRIVER=meilisearch
+   MEILISEARCH_HOST=http://localhost:7700
+   MEILISEARCH_KEY=
+   ```
+4. Push your existing theses into the index:
+   ```bash
+   php artisan scout:sync-index-settings
+   php artisan scout:import "App\Models\Thesis"
+   ```
+
+If Meilisearch isn't running (or you skip this whole section), search silently falls back to MySQL — nothing breaks.
+
+## Optional: Redis / Memurai (faster caching)
+
+Also optional — without it, the app just recomputes things like the Reports & Analytics dashboard on every request instead of caching them for a few minutes. Nothing errors or breaks either way.
+
+1. Windows doesn't run Redis directly, so install **Memurai** (a Redis-compatible server for Windows) from an **elevated/administrator** PowerShell:
+   ```powershell
+   winget install --id Memurai.MemuraiDeveloper --source winget --accept-source-agreements --accept-package-agreements
+   ```
+   It installs as a Windows service and starts automatically — no need to keep a terminal open for it.
+2. In your `.env`:
+   ```env
+   CACHE_STORE=redis
+   REDIS_CLIENT=predis
+   REDIS_HOST=127.0.0.1
+   REDIS_PORT=6379
+   REDIS_MAX_RETRIES=0
+   ```
+   (`predis`, not `phpredis` — it's a pure-PHP client, no extra PHP extension to compile.)
+3. That's it — no import/sync step needed, caching just starts working on the next request.
+
+If Redis/Memurai isn't running, `CACHE_STORE=redis` is still safe to leave set — the app detects the failure once, skips retrying it for the next 15 seconds, and just computes everything fresh instead.
+
 ## Using the Audit Log PDF Export
 
 Only users with the `export_reports` permission can download the audit log as a PDF.
