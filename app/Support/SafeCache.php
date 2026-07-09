@@ -31,7 +31,22 @@ class SafeCache
         }
 
         try {
-            return Cache::remember($key, $ttl, $callback);
+            $value = Cache::remember($key, $ttl, $callback);
+
+            // A cached value can outlive the class shape it was built from
+            // (e.g. a model gains/loses a column between when it was cached
+            // and when it's read back). PHP's unserialize() doesn't throw
+            // on that — it silently returns a __PHP_Incomplete_Class object
+            // instead, which would otherwise pass straight through to the
+            // response and break the frontend. Treat it as a miss and
+            // recompute + overwrite instead.
+            if (is_object($value) && is_incomplete_class($value)) {
+                Log::warning("Cache returned an incomplete class for [{$key}], recomputing.");
+                $value = $callback();
+                Cache::put($key, $value, $ttl);
+            }
+
+            return $value;
         } catch (Throwable $e) {
             self::tripCircuit();
             Log::warning("Cache unavailable, computing [{$key}] without it.", [

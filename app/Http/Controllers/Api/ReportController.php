@@ -115,7 +115,7 @@ class ReportController extends Controller
         $filters = $this->parseFilters($request);
 
         $results = SafeCache::remember('reports:most-cited:' . $this->filterSignature($filters), self::TTL,
-            fn () => $this->mostCitedQuery($filters)->get());
+            fn () => $this->mostCitedQuery($filters)->get()->toArray());
 
         return response()->json($results);
     }
@@ -129,6 +129,7 @@ class ReportController extends Controller
                 ->groupBy('category_id')
                 ->with('category:id,name')
                 ->get()
+                ->toArray()
         );
 
         return response()->json($results);
@@ -143,6 +144,7 @@ class ReportController extends Controller
                 ->groupBy('year_published')
                 ->orderByDesc('year_published')
                 ->get()
+                ->toArray()
         );
 
         return response()->json($results);
@@ -169,6 +171,7 @@ class ReportController extends Controller
                 ->take(10)
                 ->map(fn ($count, $keyword) => ['keyword' => $keyword, 'count' => $count])
                 ->values()
+                ->toArray()
         );
 
         return response()->json($results);
@@ -185,7 +188,7 @@ class ReportController extends Controller
         $filters = $this->parseFilters($request);
 
         $results = SafeCache::remember('reports:most-active:' . $this->filterSignature($filters), self::TTL,
-            fn () => $this->mostActiveUsersQuery($filters)->get());
+            fn () => $this->mostActiveUsersQuery($filters)->get()->toArray());
 
         return response()->json($results);
     }
@@ -196,7 +199,7 @@ class ReportController extends Controller
         $filters = $this->parseFilters($request);
 
         $results = SafeCache::remember('reports:peak-hours:' . $this->filterSignature($filters), self::TTL,
-            fn () => $this->peakHoursQuery($filters)->get());
+            fn () => $this->peakHoursQuery($filters)->get()->toArray());
 
         return response()->json($results);
     }
@@ -213,13 +216,15 @@ class ReportController extends Controller
                                     ->where('status', 'active')
                                     ->latest()
                                     ->limit(5)
-                                    ->get(),
+                                    ->get()
+                                    ->toArray(),
             'most_cited'       => CitationLog::select('thesis_id', DB::raw('COUNT(*) as citation_count'))
                                     ->groupBy('thesis_id')
                                     ->orderByDesc('citation_count')
                                     ->limit(5)
                                     ->with('thesis:id,title,authors')
-                                    ->get(),
+                                    ->get()
+                                    ->toArray(),
         ]);
 
         return response()->json($data);

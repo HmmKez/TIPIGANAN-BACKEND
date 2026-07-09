@@ -21,8 +21,12 @@ class CategoryController extends Controller
     // from ThesisController on every write).
     public function index()
     {
+        // Cache the plain array form, not the Eloquent Collection — a
+        // cached object is only as stable as the exact class shape it was
+        // serialized from; a later model change (e.g. a new column) can
+        // leave an old cached entry unable to unserialize correctly.
         $categories = SafeCache::remember(self::CACHE_KEY, 300, function () {
-            return Category::withCount('theses')->get();
+            return Category::withCount('theses')->get()->toArray();
         });
 
         return response()->json($categories);
