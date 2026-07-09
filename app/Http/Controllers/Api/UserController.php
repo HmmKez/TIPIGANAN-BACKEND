@@ -269,6 +269,19 @@ class UserController extends Controller
                                 ->latest('viewed_at')
                                 ->limit(10)
                                 ->get(),
+            // This user's own recent searches — safe for any role to see
+            // about themselves, unlike the full audit log (staff/super_admin
+            // only). description is "{name} searched for: {query}"; extract
+            // just the query for display.
+            'recent_searches' => AuditLog::where('user_id', $request->user()->id)
+                                ->where('action', 'search')
+                                ->latest('created_at')
+                                ->limit(5)
+                                ->get(['description', 'created_at'])
+                                ->map(fn ($log) => [
+                                    'query'      => preg_replace('/^.*searched for: /', '', $log->description),
+                                    'created_at' => $log->created_at,
+                                ]),
         ]);
     }
 
