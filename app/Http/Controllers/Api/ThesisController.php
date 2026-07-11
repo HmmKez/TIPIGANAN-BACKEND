@@ -63,6 +63,14 @@ class ThesisController extends Controller
                 $q->where('year_published', $request->year_published))
             ->when($request->author, fn($q) =>
                 $q->where('authors', 'LIKE', "%{$request->author}%"))
+            // Collection Management's search bar ("Search by title or
+            // author…") sends q — this was never read at all, so the
+            // search box silently did nothing regardless of what was typed.
+            ->when($request->q, fn($q) =>
+                $q->where(function ($sub) use ($request) {
+                    $sub->where('title', 'LIKE', "%{$request->q}%")
+                        ->orWhere('authors', 'LIKE', "%{$request->q}%");
+                }))
             ->latest()
             ->paginate(12);
 
