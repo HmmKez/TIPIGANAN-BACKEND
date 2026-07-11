@@ -10,7 +10,14 @@ use Illuminate\Support\Facades\Log;
 
 class SearchService
 {
-    protected int $timeout = 2;
+    // A healthy Meilisearch responds to /health in single-digit
+    // milliseconds — 2 full seconds was only ever relevant to the failure
+    // case, and on Windows a refused connection to "localhost" doesn't
+    // always fail fast (IPv6 resolution can stall before falling back to
+    // IPv4), so the old 2s timeout meant genuinely waiting close to the
+    // full 2 seconds on the one request per 15s that pays this cost.
+    // 0.5s is still generous for a real response and caps the worst case.
+    protected float $timeout = 0.5;
 
     // $includeRestricted: restricted theses are visible to any logged-in
     // user but hidden from guests entirely — same rule as browsing.
