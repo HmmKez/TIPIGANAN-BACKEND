@@ -81,20 +81,6 @@ class ReportController extends Controller
             ->when($filters['date_to'], fn ($q, $d) => $q->whereDate('created_at', '<=', $d));
     }
 
-    private function mostActiveUsersQuery(array $filters)
-    {
-        return AuditLog::select('user_id', DB::raw("COUNT(DISTINCT DATE_FORMAT(created_at, '%Y-%m-%d %H')) as active_hours"))
-            ->whereNotNull('user_id')
-            ->when($filters['roles'], fn ($q, $roles) =>
-                $q->whereHas('user', fn ($q2) => $q2->whereIn('role', $roles)))
-            ->when($filters['date_from'], fn ($q, $d) => $q->whereDate('created_at', '>=', $d))
-            ->when($filters['date_to'], fn ($q, $d) => $q->whereDate('created_at', '<=', $d))
-            ->groupBy('user_id')
-            ->orderByDesc('active_hours')
-            ->limit(10)
-            ->with('user:id,name,email,role');
-    }
-
     private function peakHoursQuery(array $filters)
     {
         return AuditLog::select(
@@ -177,22 +163,6 @@ class ReportController extends Controller
         return response()->json($results);
     }
 
-    // Most active users — "hours active" is the count of distinct
-    // date+hour buckets in which a user had at least one logged action.
-    // There's no session-duration tracking in the schema (sessions here
-    // are stateless Sanctum tokens, not the sessions table), so this is
-    // the closest honest proxy for "time spent on the site" the audit
-    // trail can support.
-    public function mostActiveUsers(Request $request)
-    {
-        $filters = $this->parseFilters($request);
-
-        $results = SafeCache::remember('reports:most-active:' . $this->filterSignature($filters), self::TTL,
-            fn () => $this->mostActiveUsersQuery($filters)->get()->toArray());
-
-        return response()->json($results);
-    }
-
     // Peak usage hours
     public function peakHours(Request $request)
     {
@@ -233,7 +203,7 @@ class ReportController extends Controller
     public function exportPdf(Request $request)
     {
         $request->validate([
-            'report'    => ['required', 'in:dashboard,most-cited,by-department,by-year,most-searched,most-active,peak-hours'],
+            'report'    => ['required', 'in:dashboard,most-cited,by-department,by-year,most-searched,peak-hours'],
             'date_from' => ['nullable', 'date'],
             'date_to'   => ['nullable', 'date', 'after_or_equal:date_from'],
             'roles'     => ['nullable', 'string'],
@@ -271,7 +241,6 @@ class ReportController extends Controller
             'by-department' => 'Thesis Count by Department',
             'by-year' => 'Thesis Count by Year',
             'most-searched' => 'Most Searched Keywords',
-            'most-active' => 'Most Active Users',
             'peak-hours' => 'Peak Usage Hours',
             default => 'Report',
         };
@@ -285,7 +254,6 @@ class ReportController extends Controller
             'by-department' => $this->byDepartmentReportData(),
             'by-year' => $this->byYearReportData(),
             'most-searched' => $this->mostSearchedReportData($filters),
-            'most-active' => $this->mostActiveUsersReportData($filters),
             'peak-hours' => $this->peakHoursReportData($filters),
             default => ['columns' => [], 'rows' => []],
         };
@@ -393,23 +361,6 @@ class ReportController extends Controller
         return [
             'columns' => ['Keyword', 'Search Count'],
             'rows' => $results->map(fn ($count, $keyword) => [$keyword, $count])->values()->toArray(),
-        ];
-    }
-
-    private function mostActiveUsersReportData(array $filters): array
-    {
-        $results = $this->mostActiveUsersQuery($filters)->get();
-
-        return [
-            'columns' => ['User', 'Email', 'Role', 'Hours Active'],
-            'rows' => $results->map(function ($item) {
-                return [
-                    $item->user?->name ?? 'Unknown',
-                    $item->user?->email ?? '-',
-                    $item->user?->role ?? '-',
-                    $item->active_hours,
-                ];
-            })->toArray(),
         ];
     }
 

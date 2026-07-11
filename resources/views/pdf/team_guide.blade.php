@@ -575,9 +575,8 @@ const openThesis = async (thesisId) => {
   <span class="badge get">GET</span> /reports/most-cited<br>
   <span class="badge get">GET</span> /reports/by-department &nbsp;&nbsp;
   <span class="badge get">GET</span> /reports/by-year &nbsp;&nbsp;
-  <span class="badge get">GET</span> /reports/most-searched<br>
-  <span class="badge get">GET</span> /reports/most-active &nbsp;&nbsp;
-  <span class="badge get">GET</span> /reports/peak-hours &nbsp;&nbsp;
+  <span class="badge get">GET</span> /reports/most-searched &nbsp;&nbsp;
+  <span class="badge get">GET</span> /reports/peak-hours<br>
   <span class="badge get">GET</span> /thesis-reports &nbsp;&nbsp;
   <span class="badge patch">PATCH</span> /thesis-reports/{id}/resolve
 </div>
