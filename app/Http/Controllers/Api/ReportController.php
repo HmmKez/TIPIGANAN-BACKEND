@@ -81,12 +81,18 @@ class ReportController extends Controller
             ->when($filters['date_to'], fn ($q, $d) => $q->whereDate('created_at', '<=', $d));
     }
 
-    private function peakHoursQuery(array $filters)
+    // Distinct users seen active in each hour-of-day (0-23), across the
+    // whole filtered date range — "how many different people tend to be
+    // on the site around 2pm", not a raw activity-volume count. Guests
+    // (user_id null) can't be individually counted, so they're excluded
+    // rather than undercounting/overcounting an unknown number of them.
+    private function usersOnlineQuery(array $filters)
     {
         return AuditLog::select(
                 DB::raw('HOUR(created_at) as hour'),
-                DB::raw('COUNT(*) as total')
+                DB::raw('COUNT(DISTINCT user_id) as users_online')
             )
+            ->whereNotNull('user_id')
             ->when($filters['roles'], fn ($q, $roles) =>
                 $q->whereHas('user', fn ($q2) => $q2->whereIn('role', $roles)))
             ->when($filters['date_from'], fn ($q, $d) => $q->whereDate('created_at', '>=', $d))
@@ -163,13 +169,13 @@ class ReportController extends Controller
         return response()->json($results);
     }
 
-    // Peak usage hours
-    public function peakHours(Request $request)
+    // Users online by hour of day
+    public function usersOnline(Request $request)
     {
         $filters = $this->parseFilters($request);
 
-        $results = SafeCache::remember('reports:peak-hours:' . $this->filterSignature($filters), self::TTL,
-            fn () => $this->peakHoursQuery($filters)->get()->toArray());
+        $results = SafeCache::remember('reports:users-online:' . $this->filterSignature($filters), self::TTL,
+            fn () => $this->usersOnlineQuery($filters)->get()->toArray());
 
         return response()->json($results);
     }
@@ -203,7 +209,7 @@ class ReportController extends Controller
     public function exportPdf(Request $request)
     {
         $request->validate([
-            'report'    => ['required', 'in:dashboard,most-cited,by-department,by-year,most-searched,peak-hours'],
+            'report'    => ['required', 'in:dashboard,most-cited,by-department,by-year,most-searched,users-online'],
             'date_from' => ['nullable', 'date'],
             'date_to'   => ['nullable', 'date', 'after_or_equal:date_from'],
             'roles'     => ['nullable', 'string'],
@@ -241,7 +247,7 @@ class ReportController extends Controller
             'by-department' => 'Thesis Count by Department',
             'by-year' => 'Thesis Count by Year',
             'most-searched' => 'Most Searched Keywords',
-            'peak-hours' => 'Peak Usage Hours',
+            'users-online' => 'Users Online',
             default => 'Report',
         };
     }
@@ -254,7 +260,7 @@ class ReportController extends Controller
             'by-department' => $this->byDepartmentReportData(),
             'by-year' => $this->byYearReportData(),
             'most-searched' => $this->mostSearchedReportData($filters),
-            'peak-hours' => $this->peakHoursReportData($filters),
+            'users-online' => $this->usersOnlineReportData($filters),
             default => ['columns' => [], 'rows' => []],
         };
     }
@@ -364,16 +370,16 @@ class ReportController extends Controller
         ];
     }
 
-    private function peakHoursReportData(array $filters): array
+    private function usersOnlineReportData(array $filters): array
     {
-        $results = $this->peakHoursQuery($filters)->get();
+        $results = $this->usersOnlineQuery($filters)->get();
 
         return [
-            'columns' => ['Hour', 'Total Activity'],
+            'columns' => ['Hour', 'Users Online'],
             'rows' => $results->map(function ($item) {
                 return [
                     sprintf('%02d:00', $item->hour),
-                    $item->total,
+                    $item->users_online,
                 ];
             })->toArray(),
         ];

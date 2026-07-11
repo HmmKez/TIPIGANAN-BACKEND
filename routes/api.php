@@ -63,7 +63,7 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('/by-department',  [ReportController::class, 'byDepartment']);
             Route::get('/by-year',        [ReportController::class, 'byYear']);
             Route::get('/most-searched',  [ReportController::class, 'mostSearched']);
-            Route::get('/peak-hours',     [ReportController::class, 'peakHours']);
+            Route::get('/users-online',   [ReportController::class, 'usersOnline']);
         });
     });
 
