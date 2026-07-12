@@ -7,6 +7,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Database dump binary (used by `php artisan backup:database`)
+    |--------------------------------------------------------------------------
+    |
+    | Path to the mysqldump executable. Defaults to 'mysqldump' (found on PATH
+    | on a standard server). On a dev machine where it isn't on PATH (e.g.
+    | Laragon on Windows), set DB_DUMP_BINARY to the full path.
+    |
+    */
+
+    'dump' => [
+        'binary' => env('DB_DUMP_BINARY', 'mysqldump'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Default Database Connection Name
     |--------------------------------------------------------------------------
     |

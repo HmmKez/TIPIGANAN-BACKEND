@@ -50,7 +50,13 @@ return [
     |
     */
 
-    'expiration' => null,
+    // Previously null (tokens never expired — once issued, a stolen or
+    // leftover token stayed valid forever, since there's no self-service
+    // reset flow or token-refresh endpoint to revoke/rotate it otherwise).
+    // 7 days balances real usage patterns (no silent refresh exists — an
+    // expired token just bounces the user to /login, same as manual logout)
+    // against not leaving tokens valid indefinitely.
+    'expiration' => env('SANCTUM_TOKEN_EXPIRATION', 10080),
 
     /*
     |--------------------------------------------------------------------------

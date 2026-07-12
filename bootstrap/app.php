@@ -15,7 +15,16 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
+        // Trust the reverse proxy's X-Forwarded-* headers so Laravel sees the
+        // real client IP and the original https scheme when running behind
+        // Nginx/a load balancer. Safe with 'at: *' on a standard single-host
+        // deploy where only the proxy faces the internet and PHP-FPM is bound
+        // to localhost; restrict to the proxy's IP if your topology differs.
+        $middleware->trustProxies(at: '*');
         $middleware->statefulApi();
+        // Adds security headers (nosniff, frame-options, referrer-policy,
+        // permissions-policy, HSTS-over-https) to every response.
+        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
         $middleware->alias([
             'role'               => RoleMiddleware::class,
             'permission'         => PermissionMiddleware::class,
