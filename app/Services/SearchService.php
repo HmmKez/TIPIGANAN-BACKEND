@@ -42,7 +42,11 @@ class SearchService
         $statuses = $includeRestricted ? ['active', 'restricted'] : ['active'];
 
         $builder = Thesis::search($query)
-            ->whereIn('status', $statuses);
+            ->whereIn('status', $statuses)
+            // Scout hydrates full models from the DB after Meilisearch
+            // returns matching IDs — query() customizes that hydration
+            // query, same views_count the Browse page relies on.
+            ->query(fn($q) => $q->withCount(['readingHistory as views_count']));
 
         if (!empty($filters['category_id'])) {
             $builder->where('category_id', (int) $filters['category_id']);
@@ -84,6 +88,7 @@ class SearchService
         $statuses = $includeRestricted ? ['active', 'restricted'] : ['active'];
 
         $builder = Thesis::query()
+            ->withCount(['readingHistory as views_count'])
             ->whereIn('status', $statuses)
             ->where(function ($q) use ($query) {
                 $q->where('title',    'LIKE', "%{$query}%")

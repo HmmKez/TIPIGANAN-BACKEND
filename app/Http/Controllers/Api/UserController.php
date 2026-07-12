@@ -7,6 +7,8 @@ use App\Models\AuditLog;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rules\Password;
 use Spatie\Permission\Models\Permission;
 
 class UserController extends Controller
@@ -38,7 +40,7 @@ class UserController extends Controller
         $request->validate([
             'name'     => 'required|string|max:255',
             'email'    => 'required|email|unique:users,email',
-            'password' => 'required|string|min:8',
+            'password' => ['required', 'string', Password::default()],
             'role'     => 'required|in:staff,super_admin',
         ]);
 
@@ -123,6 +125,10 @@ class UserController extends Controller
             'ip_address'  => $request->ip(),
         ]);
 
+        if ($user->avatar_path) {
+            Storage::disk('public')->delete($user->avatar_path);
+        }
+
         $user->delete();
 
         return response()->json(['message' => 'User deleted successfully.']);
@@ -175,7 +181,7 @@ class UserController extends Controller
     public function resetPassword(Request $request, $id)
     {
         $request->validate([
-            'password' => 'required|string|min:8|confirmed',
+            'password' => ['required', 'string', 'confirmed', Password::default()],
         ]);
 
         $user = User::findOrFail($id);
@@ -298,6 +304,44 @@ class UserController extends Controller
         return response()->json([
             'message' => 'Profile updated successfully.',
             'user'    => $request->user(),
+        ]);
+    }
+
+    // Upload/replace own profile picture
+    public function uploadAvatar(Request $request)
+    {
+        $request->validate([
+            'avatar' => 'required|image|max:2048',
+        ]);
+
+        $user = $request->user();
+
+        if ($user->avatar_path) {
+            Storage::disk('public')->delete($user->avatar_path);
+        }
+
+        $path = $request->file('avatar')->store('avatars', 'public');
+        $user->update(['avatar_path' => $path]);
+
+        return response()->json([
+            'message' => 'Profile picture updated successfully.',
+            'user'    => $user,
+        ]);
+    }
+
+    // Remove own profile picture, falling back to the initials avatar
+    public function removeAvatar(Request $request)
+    {
+        $user = $request->user();
+
+        if ($user->avatar_path) {
+            Storage::disk('public')->delete($user->avatar_path);
+            $user->update(['avatar_path' => null]);
+        }
+
+        return response()->json([
+            'message' => 'Profile picture removed.',
+            'user'    => $user,
         ]);
     }
 }

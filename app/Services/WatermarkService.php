@@ -10,6 +10,7 @@ class WatermarkService
     {
         $pdf = new WatermarkPdf();
         $pageCount = $pdf->setSourceFile($absolutePath);
+        $logoPath  = resource_path('images/mdc-logo.png');
 
         for ($i = 1; $i <= $pageCount; $i++) {
             $tplId = $pdf->importPage($i);
@@ -20,18 +21,17 @@ class WatermarkService
             $pdf->AddPage($orientation, [$size['width'], $size['height']]);
             $pdf->useTemplate($tplId);
 
-            // Diagonal watermark
-            $pdf->SetFont('Helvetica', 'B', 45);
-            $pdf->SetTextColor(255, 0, 0);
-            $pdf->SetAlpha(0.3);              // 25% opacity
-
-            // Rotate and center the text diagonally
-            $pdf->StartTransform();
-            $pdf->Rotate(45, $size['width'] / 2, $size['height'] / 2);
-            $pdf->SetXY(0, $size['height'] / 2 - 10);
-            $pdf->Cell($size['width'], 20, 'TIPIGANAN - FOR VIEWING ONLY', 0, 0, 'C');
-            $pdf->StopTransform();
-
+            // Upright logo watermark, centered on the page
+            $logoSize = min($size['width'], $size['height']) * 0.5;
+            $pdf->SetAlpha(0.15);
+            $pdf->Image(
+                $logoPath,
+                $size['width'] / 2 - $logoSize / 2,
+                $size['height'] / 2 - $logoSize / 2,
+                $logoSize,
+                $logoSize,
+                'PNG'
+            );
             $pdf->SetAlpha(1); // reset
         }
 

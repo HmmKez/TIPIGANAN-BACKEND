@@ -7,9 +7,12 @@ use App\Models\AuditLog;
 use App\Models\ReadingHistory;
 use App\Models\SignedUrlToken;
 use App\Models\Thesis;
+use App\Models\ThesisFileVersion;
+use App\Support\ThesisFilePurger;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use App\Jobs\ProcessThesisOcr;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class ThesisController extends Controller
@@ -54,6 +57,11 @@ class ThesisController extends Controller
         $defaultStatuses = $user ? ['active', 'restricted'] : ['active'];
 
         $theses = Thesis::with('category', 'uploader')
+            // Browse/Collection Management sort by and display this — a
+            // denormalized counter column was never added, so this counts
+            // reading_history rows live instead (same source show() already
+            // uses for its own view_count).
+            ->withCount(['readingHistory as views_count'])
             ->when($request->status,
                 fn($q) => $q->where('status', $request->status),
                 fn($q) => $q->whereIn('status', $defaultStatuses))
@@ -181,12 +189,25 @@ class ThesisController extends Controller
             'expires_at' => now()->addMinutes(30),
         ]);
 
-        // Record reading history
-        ReadingHistory::create([
-            'user_id'   => $request->user()->id,
-            'thesis_id' => $thesis->id,
-            'viewed_at' => now(),
-        ]);
+        // Record reading history — but only one row per "reading session"
+        // rather than one per open. Without this, refreshing/reopening the
+        // viewer repeatedly (very easy to do by accident) inflated both this
+        // user's Reading History list and the thesis's public view_count
+        // with duplicate entries for what's really a single sitting.
+        $recentView = ReadingHistory::where('user_id', $request->user()->id)
+            ->where('thesis_id', $thesis->id)
+            ->where('viewed_at', '>=', now()->subMinutes(30))
+            ->first();
+
+        if ($recentView) {
+            $recentView->update(['viewed_at' => now()]);
+        } else {
+            ReadingHistory::create([
+                'user_id'   => $request->user()->id,
+                'thesis_id' => $thesis->id,
+                'viewed_at' => now(),
+            ]);
+        }
 
         AuditLog::create([
             'user_id'     => $request->user()->id,
@@ -238,7 +259,10 @@ class ThesisController extends Controller
             'title'          => 'required|string',
             'authors'        => 'required|string',
             'adviser'        => 'required|string',
-            'abstract'       => 'required|string',
+            // Left blank, either field is auto-filled from the uploaded
+            // PDF's own Abstract/Keywords section by ProcessThesisOcr —
+            // see its handle() for the fill-only-if-empty logic.
+            'abstract'       => 'nullable|string',
             'keywords'       => 'nullable|string',
             'year_published' => 'required|digits:4|integer',
             'category_id'    => 'required|exists:categories,id',
@@ -250,6 +274,10 @@ class ThesisController extends Controller
         // Store PDF
         $pdfPath = $request->file('pdf_file')
             ->store('theses', 'local');
+
+        // Fixity: record a SHA-256 of the stored file so silent
+        // corruption/tampering can be detected later (theses:verify-checksums).
+        $checksum = hash_file('sha256', Storage::disk('local')->path($pdfPath));
 
         // Store cover image if provided
         $coverPath = null;
@@ -265,12 +293,16 @@ class ThesisController extends Controller
             'title'           => $request->title,
             'authors'         => $request->authors,
             'adviser'         => $request->adviser,
-            'abstract'        => $request->abstract,
+            // abstract is a NOT NULL column — '' (not null) when left
+            // blank, which ProcessThesisOcr's `?:` fallback treats the same
+            // as empty either way once OCR fills it in.
+            'abstract'        => $request->abstract ?? '',
             'keywords'        => $request->keywords,
             'year_published'  => $request->year_published,
             'category_id'     => $request->category_id,
             'pages'           => $request->pages,
             'file_path'       => $pdfPath,
+            'checksum'        => $checksum,
             'cover_image_path'=> $coverPath,
             'status'          => 'active',
             'uploaded_by'     => $request->user()->id,
@@ -302,7 +334,10 @@ class ThesisController extends Controller
             'title'          => 'sometimes|string',
             'authors'        => 'sometimes|string',
             'adviser'        => 'sometimes|string',
-            'abstract'       => 'sometimes|string',
+            // nullable so a cleared abstract (arrives as null via
+            // ConvertEmptyStringsToNull) passes validation — it's coerced back
+            // to '' below since the column is NOT NULL.
+            'abstract'       => 'sometimes|nullable|string',
             'keywords'       => 'nullable|string',
             'year_published' => 'sometimes|digits:4|integer',
             'category_id'    => 'sometimes|exists:categories,id',
@@ -310,11 +345,20 @@ class ThesisController extends Controller
             'status'         => 'sometimes|in:active,archived,restricted',
         ]);
 
-        Thesis::withoutSyncingToSearch(fn () => $thesis->update($request->only([
+        $data = $request->only([
             'title', 'authors', 'adviser', 'abstract',
             'keywords', 'year_published', 'category_id',
             'pages', 'status',
-        ])));
+        ]);
+        // abstract is NOT NULL — clearing it in the UI sends '' which the
+        // ConvertEmptyStringsToNull middleware turns into null; store '' so the
+        // "Clear stale value" review action (and a manually-emptied textarea)
+        // don't trip the DB constraint.
+        if (array_key_exists('abstract', $data) && $data['abstract'] === null) {
+            $data['abstract'] = '';
+        }
+
+        Thesis::withoutSyncingToSearch(fn () => $thesis->update($data));
 
         $this->syncSearchable($thesis);
 
@@ -328,6 +372,242 @@ class ThesisController extends Controller
         ]);
 
         return response()->json($thesis);
+    }
+
+    // Staff and above — replace the underlying PDF (wrong file uploaded, or
+    // a better scan becomes available later). The previous file isn't
+    // deleted immediately — it's archived as a restorable ThesisFileVersion
+    // for config('thesis.old_file_retention_days') days (see
+    // ThesisFilePurger), so a mistaken replace can still be undone.
+    public function replaceFile(Request $request, $id)
+    {
+        $thesis = Thesis::findOrFail($id);
+
+        $request->validate([
+            'pdf_file' => 'required|mimes:pdf|max:51200',
+        ]);
+
+        $oldPath = $thesis->file_path;
+        $newPath = $request->file('pdf_file')->store('theses', 'local');
+        // Fixity hash of the new file (see store()).
+        $newChecksum = hash_file('sha256', Storage::disk('local')->path($newPath));
+
+        DB::transaction(function () use ($thesis, $oldPath, $newPath, $newChecksum, $request) {
+            ThesisFileVersion::create([
+                'thesis_id'   => $thesis->id,
+                'file_path'   => $oldPath,
+                'replaced_by' => $request->user()->id,
+                'replaced_at' => now(),
+                'purge_after' => now()->addDays(config('thesis.old_file_retention_days')),
+                'status'      => 'pending',
+            ]);
+
+            // withoutSyncingToSearch: swapping the file doesn't change any
+            // searchable field (title/abstract/keywords/status), so there's
+            // nothing to re-push — and without this, a down Meilisearch would
+            // throw inside the transaction and 500 the whole replace. If the
+            // OCR re-dispatch below does fill abstract/keywords, that job runs
+            // its own best-effort sync.
+            Thesis::withoutSyncingToSearch(fn () => $thesis->update([
+                'file_path' => $newPath,
+                'checksum'  => $newChecksum,
+            ]));
+        });
+
+        AuditLog::create([
+            'user_id'     => $request->user()->id,
+            'action'      => 'replace_thesis_file',
+            'target_type' => 'thesis',
+            'target_id'   => $thesis->id,
+            'description' => "{$request->user()->name} replaced the file for thesis: {$thesis->title}",
+            'ip_address'  => $request->ip(),
+        ]);
+
+        // Run OCR on the NEW file once, up front. It does double duty:
+        //  (a) auto-fills any field the staff left blank (same convenience a
+        //      fresh upload gets — nothing to lose when a field is empty), and
+        //  (b) is returned to the caller as `detected` so the edit page can
+        //      warn when the new file's content differs from metadata still on
+        //      the record (e.g. the previous file's abstract lingering after a
+        //      replace, or a new file with no detectable abstract at all).
+        // A non-blank field is never overwritten here — refreshing stale
+        // metadata is a human review decision (see extractMetadata()).
+        // Citations need nothing similar: they derive from title/authors/year,
+        // never the file, so a swap can't make them stale.
+        $ocr = app(\App\Services\OcrService::class);
+        $extracted = $ocr->extract($thesis->file_path);
+        $detected = [
+            'abstract' => $extracted['abstract'] ?? '',
+            'keywords' => $ocr->cleanKeywords($extracted['keywords'] ?? ''),
+            'method'   => $extracted['method'] ?? 'unknown',
+        ];
+
+        Thesis::withoutSyncingToSearch(fn () => $thesis->update([
+            'abstract' => $thesis->abstract ?: $detected['abstract'],
+            'keywords' => $thesis->keywords ?: $detected['keywords'],
+        ]));
+
+        ThesisFilePurger::sweepIfDue();
+
+        return response()->json([
+            'thesis'   => $thesis->fresh(),
+            'detected' => $detected,
+        ]);
+    }
+
+    // Staff and above — re-run OCR against the thesis's CURRENT file and
+    // return what it detects WITHOUT saving anything. Powers the edit page's
+    // "Re-extract from current file" review: staff see what the active file
+    // actually contains and choose, per field, whether to apply it — so a
+    // stale abstract/keywords left over from a previously-replaced file can be
+    // refreshed under human review instead of being silently overwritten.
+    public function extractMetadata(Request $request, $id)
+    {
+        $thesis = Thesis::findOrFail($id);
+
+        $ocr = app(\App\Services\OcrService::class);
+        $extracted = $ocr->extract($thesis->file_path);
+
+        return response()->json([
+            'abstract' => $extracted['abstract'] ?? '',
+            'keywords' => $ocr->cleanKeywords($extracted['keywords'] ?? ''),
+            'method'   => $extracted['method'] ?? 'unknown',
+        ]);
+    }
+
+    // Staff and above — list restorable file versions for a thesis, most
+    // recently replaced first, alongside the currently-active file. Each row
+    // carries the file's byte size: a random hashed storage name tells staff
+    // nothing, but size (plus the Preview endpoint below) lets them actually
+    // tell which file is which when deciding what to restore.
+    public function listFileVersions($id)
+    {
+        $thesis = Thesis::findOrFail($id);
+        ThesisFilePurger::sweepIfDue();
+
+        $versions = ThesisFileVersion::where('thesis_id', $id)
+            ->with('replacer:id,name')
+            ->orderByDesc('replaced_at')
+            ->get()
+            ->map(function ($v) {
+                // null size = the underlying file is gone (a purged version) —
+                // the frontend uses this to hide Preview for those rows.
+                $v->size = Storage::disk('local')->exists($v->file_path)
+                    ? Storage::disk('local')->size($v->file_path)
+                    : null;
+                return $v;
+            });
+
+        return response()->json([
+            'current' => [
+                'size' => Storage::disk('local')->exists($thesis->file_path)
+                    ? Storage::disk('local')->size($thesis->file_path)
+                    : null,
+            ],
+            'versions' => $versions,
+        ]);
+    }
+
+    // Staff and above — open the CURRENT active file inline so it can be
+    // compared against archived versions before restoring. Raw (un-watermarked),
+    // same as the staff download() — this is internal verification, not the
+    // reader-facing secure viewer.
+    public function previewFile(Request $request, $id)
+    {
+        $thesis = Thesis::findOrFail($id);
+        return $this->streamPdfInline($thesis->file_path, $thesis->title);
+    }
+
+    // Staff and above — open a specific archived version inline, same purpose.
+    public function previewFileVersion(Request $request, $id, $versionId)
+    {
+        $version = ThesisFileVersion::where('thesis_id', $id)->findOrFail($versionId);
+        return $this->streamPdfInline($version->file_path, 'version-' . $version->id);
+    }
+
+    private function streamPdfInline(?string $path, string $label)
+    {
+        if (! $path || ! Storage::disk('local')->exists($path)) {
+            return response()->json(['message' => 'File not found.'], 404);
+        }
+
+        return response()->file(Storage::disk('local')->path($path), [
+            'Content-Type'        => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="' . $label . '.pdf"',
+            'Cache-Control'       => 'no-store, no-cache',
+        ]);
+    }
+
+    // Staff and above — promote a superseded version back to being the
+    // active file. The file that's active right now (about to be displaced)
+    // is archived the same way a normal replace would archive it — restoring
+    // never destroys data either, it's just another swap.
+    public function restoreFileVersion(Request $request, $id, $versionId)
+    {
+        $thesis  = Thesis::findOrFail($id);
+        $version = ThesisFileVersion::where('thesis_id', $id)
+            ->where('status', 'pending')
+            ->findOrFail($versionId);
+
+        $currentPath = $thesis->file_path;
+        // Fixity hash of the file being restored (becomes the active file).
+        $restoredChecksum = Storage::disk('local')->exists($version->file_path)
+            ? hash_file('sha256', Storage::disk('local')->path($version->file_path))
+            : null;
+
+        DB::transaction(function () use ($thesis, $version, $currentPath, $restoredChecksum, $request) {
+            ThesisFileVersion::create([
+                'thesis_id'   => $thesis->id,
+                'file_path'   => $currentPath,
+                'replaced_by' => $request->user()->id,
+                'replaced_at' => now(),
+                'purge_after' => now()->addDays(config('thesis.old_file_retention_days')),
+                'status'      => 'pending',
+            ]);
+
+            // Same reasoning as replaceFile(): only file_path changes, no
+            // searchable field, so skip the Scout sync (and don't let a down
+            // Meilisearch 500 the restore).
+            Thesis::withoutSyncingToSearch(fn () => $thesis->update([
+                'file_path' => $version->file_path,
+                'checksum'  => $restoredChecksum,
+            ]));
+            $version->update(['status' => 'restored']);
+        });
+
+        AuditLog::create([
+            'user_id'     => $request->user()->id,
+            'action'      => 'restore_thesis_file',
+            'target_type' => 'thesis',
+            'target_id'   => $thesis->id,
+            'description' => "{$request->user()->name} restored a previous file version for thesis: {$thesis->title}",
+            'ip_address'  => $request->ip(),
+        ]);
+
+        return response()->json($thesis->fresh());
+    }
+
+    // Staff and above — permanently delete a superseded version before its
+    // grace period naturally expires ("Delete Now").
+    public function deleteFileVersion(Request $request, $id, $versionId)
+    {
+        $version = ThesisFileVersion::where('thesis_id', $id)
+            ->where('status', 'pending')
+            ->findOrFail($versionId);
+
+        Storage::disk('local')->delete($version->file_path);
+        $version->update(['status' => 'purged', 'purged_at' => now()]);
+
+        AuditLog::create([
+            'user_id'     => $request->user()->id,
+            'action'      => 'purge_thesis_file_version',
+            'target_type' => 'thesis',
+            'target_id'   => $id,
+            'description' => "{$request->user()->name} permanently deleted a superseded file version (thesis #{$id})",
+            'ip_address'  => $request->ip(),
+        ]);
+
+        return response()->json(['message' => 'File version permanently deleted.']);
     }
 
     // Staff and above — archive

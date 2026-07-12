@@ -12,7 +12,7 @@ class Thesis extends Model
 
     protected $fillable = [
         'title', 'authors', 'adviser', 'abstract', 'keywords',
-        'year_published', 'category_id', 'pages', 'file_path',
+        'year_published', 'category_id', 'pages', 'file_path', 'checksum',
         'cover_image_path', 'status', 'uploaded_by',
     ];
 
@@ -74,5 +74,10 @@ class Thesis extends Model
     public function reports()
     {
         return $this->hasMany(ThesisReport::class);
+    }
+
+    public function fileVersions()
+    {
+        return $this->hasMany(ThesisFileVersion::class);
     }
 }

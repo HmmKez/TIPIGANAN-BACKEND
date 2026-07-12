@@ -25,26 +25,16 @@ class ProcessThesisOcr implements ShouldQueue
         Log::info("OCR: Starting extraction for thesis ID {$this->thesis->id}");
 
         $extracted = $ocr->extract($this->thesis->file_path);
+        $cleanedKeywords = $ocr->cleanKeywords($extracted['keywords'] ?? '');
 
-        // Merge extracted keywords with manually entered ones
-        $existingKeywords = $this->thesis->keywords ?? '';
-        $ocrKeywords      = $extracted['keywords'];
-
-        $mergedKeywords = implode(', ', array_unique(array_filter(
-            array_merge(
-                array_map('trim', explode(',', $existingKeywords)),
-                array_map('trim', explode(',', $ocrKeywords))
-            )
-        )));
-
-        // QUEUE_CONNECTION=sync means this job runs inline with the upload
-        // request — an unguarded Meilisearch call here (cURL error 7 when
-        // it's offline) would fail the whole request even though OCR and
-        // the DB write already succeeded. Same safe pattern as the
-        // controller: skip the automatic sync, then retry it best-effort.
-        Thesis::withoutSyncingToSearch(function () use ($mergedKeywords, $extracted) {
+        // Only fill in what the staff member left blank — same rule for
+        // both fields now. Previously keywords were unconditionally merged
+        // with whatever OCR found on *every* upload, even when the staff
+        // had already typed a real list, which is how earlier test uploads
+        // ended up with long/garbled keywords in the first place.
+        Thesis::withoutSyncingToSearch(function () use ($cleanedKeywords, $extracted) {
             $this->thesis->update([
-                'keywords' => $mergedKeywords,
+                'keywords' => $this->thesis->keywords ?: $cleanedKeywords,
                 'abstract' => $this->thesis->abstract ?: $extracted['abstract'],
             ]);
         });

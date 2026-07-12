@@ -12,10 +12,19 @@ use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ThesisReportController;
 
+// Rate limiting — a generous ceiling on every route below (mitigates
+// scraping/abuse of public browse/search) plus a much stricter limit
+// specifically on login/register (mitigates password brute-forcing).
+// Both are keyed by IP for anonymous requests, by user ID once authenticated
+// — Laravel's throttle middleware picks whichever is available automatically.
+Route::middleware('throttle:120,1')->group(function () {
+
 // Public routes
 Route::prefix('auth')->group(function () {
-    Route::post('/register', [AuthController::class, 'register']);
-    Route::post('/login',    [AuthController::class, 'login']);
+    Route::middleware('throttle:5,1')->group(function () {
+        Route::post('/register', [AuthController::class, 'register']);
+        Route::post('/login',    [AuthController::class, 'login']);
+    });
 });
 
 // Public browsing
@@ -36,6 +45,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Profile — any logged in user
     Route::get('/profile',        [UserController::class, 'profile']);
     Route::put('/profile',        [UserController::class, 'updateProfile']);
+    Route::post('/profile/avatar',   [UserController::class, 'uploadAvatar']);
+    Route::delete('/profile/avatar', [UserController::class, 'removeAvatar']);
 
     // User management — staff and above
     Route::middleware('role:staff|super_admin')->group(function () {
@@ -125,6 +136,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('/theses/{id}/status',     [ThesisController::class, 'updateStatus']);
         Route::get('/theses/{id}/download',     [ThesisController::class, 'download']);
 
+        // Replacing/restoring the underlying PDF file — see ThesisFilePurger
+        // for how superseded versions get cleaned up.
+        Route::post('/theses/{id}/file',                          [ThesisController::class, 'replaceFile']);
+        Route::post('/theses/{id}/extract-metadata',              [ThesisController::class, 'extractMetadata']);
+        Route::get('/theses/{id}/file-versions',                  [ThesisController::class, 'listFileVersions']);
+        Route::get('/theses/{id}/file-preview',                   [ThesisController::class, 'previewFile']);
+        Route::get('/theses/{id}/file-versions/{versionId}/preview', [ThesisController::class, 'previewFileVersion']);
+        Route::post('/theses/{id}/file-versions/{versionId}/restore', [ThesisController::class, 'restoreFileVersion']);
+        Route::delete('/theses/{id}/file-versions/{versionId}',   [ThesisController::class, 'deleteFileVersion']);
+
         Route::put('/theses/{thesisId}/citations/{citationId}', [CitationController::class, 'update']);
         Route::delete('/theses/{thesisId}/citations/{citationId}', [CitationController::class, 'destroy']);
 
@@ -140,3 +161,5 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
 });
+
+}); // end throttle:120,1
