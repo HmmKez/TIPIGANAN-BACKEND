@@ -350,6 +350,19 @@ Ran a deploy-readiness diagnostic; Tier 1 (must-fix-before-live) split into in-r
 - **`.env.production.example`** (frontend, NEW) — `VITE_API_BASE_URL` template (copy to `.env.production`, set real API URL, `npm run build`).
 - App boots, CORS verified both modes, suite green (4/4). Server-side Tier 1 (real credentials, Meilisearch key generation, TLS cert, PHP/Nginx upload limits, frontend build) left as the §7 checklist since they need the actual host.
 
+### Thesis upload limit raised 50MB → 150MB (user request), with the memory implication measured
+- `ThesisController::store()` and `replaceFile()` validation `max:51200` → `max:153600`; `ThesisUploadPage.jsx`'s two "Max 50 MB" hints updated. (Cover images/avatars stay at 2MB.)
+- **The real constraint isn't storage, it's watermarking memory.** `WatermarkService::stamp()` imports *every* page via FPDI and builds the full output as an in-memory string, on *every view*. Measured against a purpose-built 135MB/240-page synthetic scan (unique noise image per page — a first attempt failed because FPDF de-duplicates identical images, yielding a 193KB file from 220 pages):
+
+  | memory_limit | Result |
+  |---|---|
+  | 256M | **Fatal OOM** |
+  | 384M | OK — peak 290MB |
+  | 512M | OK — peak 290MB, ~1.5–2.2s |
+
+  So a 150MB thesis needs ~320MB peak. **PHP's default `memory_limit` is 128M**, which would 500 on any large thesis in production. Rather than depend on the server's php.ini being tuned, `servePdf()` now calls a private `ensureMemoryLimitAtLeast(512MB)` that raises the limit for that request only — it never lowers an already-higher limit and leaves `-1` (unlimited) alone.
+- **Capacity impact (important)**: large PDFs cost ~60x a small one on both axes — ~2s vs ~34ms, and ~300MB vs ~50MB. Each concurrent large-thesis view holds ~300MB, so a 2GB server realistically supports only ~4–5 simultaneous large-thesis reads. Sized into the deploy checklist (§7): `memory_limit ≥ 512M`, PHP/Nginx upload limits 160M, and PHP-FPM `workers × 300MB` must fit RAM.
+
 ### Deploy-readiness Tier 3 — timezone, fixity, automated tests, load-test findings
 - **Timezone → Asia/Manila.** `config/app.php` now reads `env('APP_TIMEZONE', 'UTC')`; dev `.env` and the prod template set `Asia/Manila` so reports ("Users Online by hour"), audit timestamps, and activity feeds render in PH time. Verified `now()` returns +8. **Caveat documented**: set before go-live on a fresh DB — flipping on populated data leaves old (UTC) rows 8h off.
 - **Fixity / checksums (was parked #12, user opted in).** `theses.checksum` (SHA-256, nullable migration); computed on `store()`, `replaceFile()`, and `restoreFileVersion()` (so the active file's hash always matches whatever file is live). New `php artisan theses:verify-checksums` backfills missing hashes and recomputes each file to detect corruption/tampering (logs `Log::warning` on mismatch/missing, non-zero exit for monitors); scheduled weekly. **Verified end-to-end**: backfilled 22 existing theses, detected a deliberately-corrupted hash as MISMATCH, flagged a file-missing thesis as MISSING.
@@ -568,7 +581,8 @@ From the deploy-readiness diagnostic. **Tier 1 = must-do before going live; Tier
 - [ ] **Database**: create a dedicated limited-privilege MySQL user (NOT root) + strong password; set `DB_USERNAME`/`DB_PASSWORD`.
 - [ ] **Redis**: set a password (or bind to 127.0.0.1 + protected-mode).
 - [ ] **TLS cert** (Let's Encrypt/Certbot on Nginx) + HTTP→HTTPS redirect. (Laravel side already forces https in production + trusts the proxy.)
-- [ ] **Raise upload limits** so 50MB PDFs work: PHP `upload_max_filesize=60M` + `post_max_size=60M`; Nginx `client_max_body_size 60M;`.
+- [ ] **Raise upload limits** so **150MB** PDFs work (the app validates `max:153600`): PHP `upload_max_filesize=160M` + `post_max_size=160M`; Nginx `client_max_body_size 160M;`. Defaults (2M/8M/1M) are far below this and reject large scans with a cryptic error before Laravel sees them.
+- [ ] **`memory_limit` ≥ 512M** — watermarking a large thesis needs ~2x its file size in RAM. **Measured**: a 135MB/240-page scan peaks at **290MB** and hard-OOMs at 256M. PHP's default is **128M**, which would 500 on any large thesis. The app now defends itself (`servePdf` raises its own limit to 512M per-request), but set it in `php.ini` too. **Size the PHP-FPM pool for this**: each concurrent *large*-PDF view holds ~300MB, so `workers × 300MB` must fit in RAM (a 2GB box realistically supports only ~4-5 simultaneous large-thesis views).
 - [ ] **Frontend**: copy `.env.production.example` → `.env.production`, set `VITE_API_BASE_URL=https://<api-domain>/api`, `npm run build`, deploy `dist/`.
 - [ ] `php artisan migrate --force` + `php artisan storage:link` on the server.
 - [ ] `php artisan config:cache && php artisan route:cache && php artisan event:cache`.

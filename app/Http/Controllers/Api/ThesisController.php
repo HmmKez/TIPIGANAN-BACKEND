@@ -242,6 +242,16 @@ class ThesisController extends Controller
             return response()->json(['message' => 'File not found.'], 404);
         }
 
+        // Watermarking imports every page via FPDI and builds the whole output
+        // as an in-memory string, so it needs roughly 2x the file size in RAM.
+        // Measured: a 135MB / 240-page scan peaks at ~290MB and hard-OOMs under
+        // ~300MB. With PDFs allowed up to 150MB, that means ~320MB is needed —
+        // but PHP's *default* memory_limit is 128M, which would 500 on any
+        // large thesis. Raise it for this request only, rather than depending
+        // on the server's php.ini being tuned. Never lowers an already-higher
+        // limit, and leaves an unlimited (-1) limit alone.
+        $this->ensureMemoryLimitAtLeast(512 * 1024 * 1024);
+
         $watermarked = (new \App\Services\WatermarkService())->stamp($path);
 
         return response($watermarked, 200, [
@@ -250,6 +260,31 @@ class ThesisController extends Controller
             'Cache-Control'       => 'no-store, no-cache',
             'Content-Length'      => strlen($watermarked),
         ]);
+    }
+
+    // Raises PHP's memory_limit for the current request if it's below what the
+    // caller needs. Only ever raises — an already-larger limit, or an unlimited
+    // (-1) one, is left untouched.
+    private function ensureMemoryLimitAtLeast(int $bytes): void
+    {
+        $current = trim((string) ini_get('memory_limit'));
+
+        if ($current === '' || $current === '-1') {
+            return; // unlimited (or unreadable) — nothing to raise
+        }
+
+        $unit  = strtolower(substr($current, -1));
+        $value = (int) $current;
+        $currentBytes = match ($unit) {
+            'g'     => $value * 1024 * 1024 * 1024,
+            'm'     => $value * 1024 * 1024,
+            'k'     => $value * 1024,
+            default => $value,
+        };
+
+        if ($currentBytes < $bytes) {
+            @ini_set('memory_limit', (int) ceil($bytes / 1048576) . 'M');
+        }
     }
 
     // Staff and above — upload new thesis
@@ -268,7 +303,7 @@ class ThesisController extends Controller
             'category_id'    => 'required|exists:categories,id',
             'pages'          => 'nullable|integer',
             'cover_image'    => 'nullable|image|max:2048',
-            'pdf_file'       => 'required|mimes:pdf|max:51200',
+            'pdf_file'       => 'required|mimes:pdf|max:153600',
         ]);
 
         // Store PDF
@@ -384,7 +419,7 @@ class ThesisController extends Controller
         $thesis = Thesis::findOrFail($id);
 
         $request->validate([
-            'pdf_file' => 'required|mimes:pdf|max:51200',
+            'pdf_file' => 'required|mimes:pdf|max:153600',
         ]);
 
         $oldPath = $thesis->file_path;
