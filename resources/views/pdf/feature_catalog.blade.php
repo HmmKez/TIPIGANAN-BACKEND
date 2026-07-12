@@ -171,6 +171,7 @@
 <h2 class="sub">3.2 Collection (Thesis) Management</h2>
 <ul>
   <li>Upload with full bibliographic metadata: title, author(s), adviser, year published, category/department, page count, abstract, keywords, cover image, and the PDF itself.</li>
+  <li><b>Accepted files:</b> the collection document must be a <b>PDF</b>, up to <b>150&nbsp;MB</b> — large enough for a full high-resolution scan of a physical thesis. Cover images and profile pictures are limited to 2&nbsp;MB. Every upload is validated for both file type and size before it is accepted.</li>
   <li>Abstract and keywords may be left blank — the system extracts them automatically from the document's own Abstract/Keywords section (see 3.3), without ever overwriting anything a staff member typed.</li>
   <li><b>Three-tier visibility:</b> <b>Active</b> (visible to everyone including guests), <b>Restricted</b> (visible to any logged-in college account, hidden from guests), and <b>Archived</b> (hidden from everyone but retrievable by staff).</li>
   <li>Full metadata editing after upload, from a dedicated staff edit page.</li>
