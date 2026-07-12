@@ -31,7 +31,7 @@
 - **Frontend**: `C:\Users\conch\Codes\CAPSTONE\tipiganan-frontend` (React + Vite, Axios)
 - **Team guide / blueprint source docs**: `C:\Users\conch\Desktop\CAPSTONE\*.pdf`
 - **Team**: Group 7 — Concha, Esto, Mendez, Miano
-- **Both repos are on `dev`.** Everything through the mobile-responsiveness audit (§3, "UI/UX polish" and earlier) is committed and pushed to `origin/dev`. **Everything from "Post-mobile-audit round" onward (dark/light theme through PDF file versioning and usage-stats dedup) is currently uncommitted working-tree changes on both repos.** Not committed/pushed because the user hasn't asked for that yet; do so when they do, not proactively.
+- **Both repos are on `dev`, and everything is committed and pushed to `origin/dev`** (as of 2026-07-12). Backend pushed as 3 commits (`test:` feature coverage, `feat:` production readiness, `feat:` file versioning/OCR review/fixity/avatars); frontend as 1 (`feat:` file-versioning UI, OCR review, dark theme, avatars, security fixes). Nothing is left sitting in the working tree.
 
 ---
 
