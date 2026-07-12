@@ -26,6 +26,9 @@
         <env name="PERMISSION_CACHE_STORE" value="array"/>
         <env name="DB_CONNECTION" value="sqlite"/>
         <env name="DB_DATABASE" value=":memory:"/>
+        <!-- Keep tests off Meilisearch — the collection engine is a no-op on
+             writes, so creating theses never tries to reach a search server. -->
+        <env name="SCOUT_DRIVER" value="collection"/>
         <env name="DB_URL" value=""/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
