@@ -164,7 +164,7 @@
   <li>Email/password login issuing a bearer token valid for 7 days (configurable) before re-login is required.</li>
   <li>Self-service password change from a user's own profile; admin-assisted password reset for any account. By deliberate design there is <b>no self-service "forgot password" email flow</b> — resets are requested from staff in person.</li>
   <li>A single password policy — minimum 8 characters including upper-case, lower-case, and a number — enforced identically everywhere a password is set (registration, self-change, admin-created accounts, admin resets), with instant in-form feedback.</li>
-  <li>Login and registration are rate-limited to 5 attempts per minute, with a live "try again in N seconds" countdown once triggered. Every other endpoint is limited to 120 requests/minute as a general abuse and scraping guard.</li>
+  <li>Login is protected against password guessing: five <b>failed</b> attempts in a minute lock that account with a live "try again in N seconds" countdown. Only failures are counted and a successful sign-in clears them, so ordinary use is never blocked. The sign-in and registration endpoints additionally carry a 20-requests-per-minute ceiling, and every other endpoint is limited to 120 requests per minute as a general abuse and scraping guard.</li>
   <li>Profile picture upload (2 MB limit), displayed wherever the account appears — sidebar, admin user table, and profile page — falling back to an initials avatar when none is set.</li>
 </ul>
 
@@ -194,9 +194,11 @@
 
 <h2 class="sub">3.4 Search &amp; Browse</h2>
 <ul>
+  <li><b>Searching and browsing are a single screen.</b> With an empty search box the page lists the collection; entering a query turns the same page into full-text search results. Readers are never asked to decide up front whether they are "browsing" or "searching."</li>
   <li>Full-text search across title, authors, adviser, abstract, and keywords — typo-tolerant and relevance-ranked.</li>
   <li>Search never goes fully down: if the dedicated search engine is unavailable, the system automatically falls back to a database search. Results still appear; only typo-tolerance and relevance ranking are temporarily lost.</li>
-  <li>Filterable by department/category and year of publication; sortable by relevance, newest, or most-viewed.</li>
+  <li>Filterable by department/category and year of publication; sortable by relevance, newest, or most-viewed, with paginated results.</li>
+  <li>Suggested quick-search tags for common topics, giving a visitor with no specific query in mind a way into the collection.</li>
   <li>Browse organized by department/category with cover images and real per-item view counts.</li>
   <li><b>Related collections</b> on each detail page, ranked by actual keyword and abstract overlap with the item being viewed — not merely "same category."</li>
   <li>A user's own recent searches feed their personal dashboard. These are private to that user and entirely distinct from the staff-only audit trail.</li>
@@ -223,7 +225,8 @@
   <li><b>Most Cited</b> collections (from real citation-copy events) and <b>Most Searched</b> terms (from real search logs) — both filterable by role (student/teacher/both) and by date range.</li>
   <li><b>Users Online</b> — the number of distinct logged-in accounts active per hour of the day, filterable the same way. Guests are excluded, since they have no identity to count.</li>
   <li><b>Deduplicated usage statistics.</b> View counts represent distinct reading sessions, not raw page-opens: reopening or refreshing the same document within a 30-minute window counts once, so the numbers reflect genuine readership rather than inflated clicks.</li>
-  <li>PDF export for any report, plus a separate audit-log PDF export with a custom date range.</li>
+  <li>PDF export for any report — these are fixed-size summaries meant to be read and printed.</li>
+  <li>The audit log exports as <b>CSV</b> instead, with a custom date range and activity filter. It is a record rather than a report: it grows without bound and is meant to be filtered, sorted and pivoted in a spreadsheet, so it is streamed to the browser at constant memory no matter how large the log becomes.</li>
 </ul>
 
 <h2 class="sub">3.8 Audit Trail</h2>
@@ -253,6 +256,9 @@
   <li><b>User management</b> — create Staff/Super Admin accounts, activate/deactivate any account, delete accounts (subject to the role hierarchy), grant/revoke individual permissions, and perform admin-assisted password resets.</li>
   <li><b>Collection management</b> — the full collection list with search and filters, restrict/unrestrict, archive/unarchive, permission-gated delete, and the file replacement and version-history tools.</li>
   <li><b>Category management</b> with cover images.</li>
+  <li><b>Active academic term</b> — the semester and school year displayed in the top bar are edited in place by a Super Admin: click the badge, choose the semester, set the starting school year. Rolling the system over to a new term therefore requires no code change and no redeployment. All other roles, and guests, see it as read-only text, and every change is recorded in the audit trail.</li>
+  <li><b>Landing page image</b> — the main image on the public landing page is uploaded and replaced by a Super Admin from the page itself, with a one-click reset to the default. The public face of the repository can therefore be re-branded without a code change or redeployment. Changes are recorded in the audit trail.</li>
+  <li><b>Featured collections</b> — a Super Admin selects, from the landing page itself, which collections appear in its public "Explore the Collections" grid, with a one-click option to show every collection again (including any created later). Every collection is displayed by default, so a new installation requires no configuration. Changes are recorded in the audit trail.</li>
 </ul>
 
 <h2 class="sub">3.12 Performance &amp; Reliability</h2>
@@ -271,7 +277,7 @@
 
 <h2 class="sub">3.14 Security Hardening</h2>
 <ul>
-  <li>Rate limiting on every endpoint, with a much stricter limit on login and registration to blunt password brute-forcing.</li>
+  <li>Rate limiting on every endpoint, plus a per-account failed-attempt lockout on login to blunt password brute-forcing without penalising legitimate sign-ins.</li>
   <li>Authentication tokens expire automatically rather than remaining valid indefinitely.</li>
   <li>Password complexity enforced everywhere a password is set.</li>
   <li><b>Cross-site scripting (XSS) protection</b> — no user-supplied content (collection titles, account names) can execute as script in another user's browser; all dynamic text is escaped.</li>
@@ -305,7 +311,7 @@
   <tr><td class="k">Spatie Laravel-Permission</td><td>The role and permission system underpinning all role-based access control.</td><td><span class="req">REQUIRED</span></td></tr>
   <tr><td class="k">Laravel Scout</td><td>The search abstraction layer. Lets the system talk to a search engine, and lets it fall back to the database when none is available.</td><td><span class="req">REQUIRED</span></td></tr>
   <tr><td class="k">FPDI + FPDF</td><td>Reads the stored PDF and stamps the per-reader watermark onto every page at view time.</td><td><span class="req">REQUIRED</span></td></tr>
-  <tr><td class="k">DomPDF</td><td>Generates the PDF exports — analytics reports, audit-log exports, and this document.</td><td><span class="req">REQUIRED</span></td></tr>
+  <tr><td class="k">DomPDF</td><td>Generates the PDF exports — analytics reports and this document. (The audit log exports as CSV, which needs no library.)</td><td><span class="req">REQUIRED</span></td></tr>
   <tr><td class="k">Predis</td><td>The client used to talk to Redis. Pure PHP, so no compiled extension is needed.</td><td><span class="opt">OPTIONAL</span></td></tr>
 </table>
 

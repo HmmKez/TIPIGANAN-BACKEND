@@ -106,6 +106,7 @@ database/
                ..._create_thesis_file_versions_table.php   NEW
                ..._add_indexes_to_theses_table.php   NEW — (status, created_at) composite + year_published (§3, scale prep)
                ..._add_checksum_to_theses_table.php  NEW — SHA-256 fixity hash, nullable (§3 Tier 3)
+               ..._create_settings_table.php         NEW — key/value store; holds the editable Active Term (§3)
   seeders/     PermissionSeeder.php (reset_passwords now default staff perm; manage_users removed)
                CategorySeeder.php (parent_id removed)
                ThesisSeeder.php (wrapped in withoutSyncingToSearch — was crashing `migrate --seed`
@@ -132,7 +133,13 @@ phpunit.xml               PERMISSION_CACHE_STORE=array added alongside CACHE_STO
 tests/Feature/AuditLogExportTest.php   fixed (was crashing on User::factory(), then failing the
                                         role-gate check — both pre-existing bugs, unrelated to this session)
 routes/api.php             most-active route removed, peak-hours renamed to users-online; whole file now
-                           throttle:120,1, login/register additionally throttle:5,1; file-version routes NEW
+                           throttle:api, login/register additionally throttle:auth (NAMED limiters — inline
+                           throttles share one IP-keyed counter when nested, which 429'd every first login);
+                           file-version routes NEW
+app/Providers/AppServiceProvider.php   Password::defaults(); URL::forceScheme(https) in prod; NEW named rate
+                           limiters `api` (120/min) and `auth` (20/min)
+app/Http/Controllers/Api/AuthController.php   login() now runs a per-account failed-attempt brute-force guard
+                           (keyed email|ip, only failures count, cleared on success)
 .env                        CACHE_STORE=redis, REDIS_CLIENT=predis, REDIS_MAX_RETRIES=0, Meilisearch config,
                            SANCTUM_TOKEN_EXPIRATION, THESIS_OLD_FILE_RETENTION_DAYS
 .env.example                 fixed stale REDIS_CLIENT=phpredis → predis, documented REDIS_MAX_RETRIES,
@@ -383,7 +390,7 @@ The three Tier 2 items with an in-repo component (all free), done now; their ser
 
 ### Security hardening round
 User asked "what am I missing / does this meet the requirements of a proper system", prompting a full audit (rate limiting, CSRF, auth token lifetime, password policy, 2FA, HTTPS enforcement, SQL injection surface, XSS, test coverage, CI/CD, accessibility, backups, error monitoring, logging) — findings discussed, then four were picked to fix now:
-- **Rate limiting**: the whole API previously had zero throttling — brute-forcing `/auth/login` was completely unmitigated. `routes/api.php` now wraps every route in `throttle:120,1` (general abuse/scraping ceiling) with a much stricter `throttle:5,1` nested specifically on `/auth/login` and `/auth/register`. Verified live: a burst of requests correctly returns `429` once the limit is hit.
+- **Rate limiting**: the whole API previously had zero throttling — brute-forcing `/auth/login` was completely unmitigated. `routes/api.php` wrapped every route in `throttle:120,1` (general abuse/scraping ceiling) with a much stricter `throttle:5,1` nested specifically on `/auth/login` and `/auth/register`. Verified live: a burst of requests correctly returns `429` once the limit is hit. **⚠️ This nesting turned out to be broken — superseded by the "Login rate-limiting" fix below; the current design is named limiters + a per-account failed-attempt counter.**
 - **Auth tokens never expired**: `config/sanctum.php`'s `expiration` was `null` — a stolen or leftover token stayed valid forever. Now `env('SANCTUM_TOKEN_EXPIRATION', 10080)` (7 days). No self-service reset or silent token-refresh exists, so an expired token just bounces to `/login`, same as manual logout.
 - **429 UX**: since login/register now actually throttle, added a live countdown ("Too many attempts, try again in Ns") to both pages (`src/utils/rateLimit.js` — `getRetryAfterSeconds()` + `useCountdown()` hook), reading Laravel's `Retry-After` header. Had to also add `'Retry-After'` to `config/cors.php`'s `exposed_headers` — CORS hides all but a small standard set of response headers from JS by default, so without this the frontend could see *that* it was throttled but not *how long* to wait. Verified the whole chain live (429 + `Retry-After: 51` + `Access-Control-Expose-Headers: Retry-After` all present together).
 - **Stored XSS**: three `dangerouslySetInnerHTML` call sites (`Layout.jsx`'s activity dropdown, `DashboardPage.jsx`, `ProfilePage.jsx`) rendered a regex-bolded version of thesis titles / account names with no HTML escaping — either field containing a script payload would execute for anyone viewing that activity feed. Neither field is sanitized server-side (nor should title/name arbitrarily be over-restricted). Fixed by replacing the raw-HTML string-replace with a shared `src/utils/boldQuoted.jsx` that returns real React nodes (auto-escaped) instead of an HTML string — same bolded-quote visual, no injection surface. Confirmed no other `dangerouslySetInnerHTML` usage exists anywhere in the frontend.
@@ -426,6 +433,177 @@ Separate follow-up audit specifically against digital/institutional-repository d
 - Previously inserted a brand-new `reading_history` row on *every* PDF-open, so refreshing the viewer repeatedly inflated both the public `view_count` and the user's own Reading History list with duplicate entries for one sitting.
 - Now checks for an existing `reading_history` row for that user+thesis within the last 30 minutes — if found, just bumps its `viewed_at` instead of inserting a duplicate. Turns the count into "distinct reading sessions." No bot/anonymous concern to guard against separately — `generateViewToken()` already requires a logged-in user, so every view is already tied to a real known account.
 - Verified live: opened the same thesis 3 times back-to-back, confirmed `view_count` stayed at 1 and only 1 raw `reading_history` row exists.
+
+### Login rate-limiting — every first login attempt was 429'd (real bug, fixed)
+User report: *"why is it when i try to login to an existing account i always get rate limited even though it is my first time logging in."* Reproduced and fixed.
+
+**Root cause.** Laravel's inline `throttle:X,Y` middleware builds its cache key from the **client IP alone** — the route is *not* part of the key (`ThrottleRequests::resolveRequestSignature()` returns `sha1(domain|ip)` for a guest), and the key prefix is empty for inline throttles. So the outer `throttle:120,1` and the nested `throttle:5,1` on `/auth/login` were **incrementing and reading the exact same counter**. Every ordinary public request from that IP — the homepage listing theses, categories, search, PDF views — pushed that shared counter up, and the login route then compared it against a limit of **5**. By the time a user reached the login form, the counter was long past 5, so the very first login attempt 429'd *before the credentials were ever checked*. (The "existing account" detail was a red herring — it never got that far.) This was latent from the security-hardening round above and would have hit **every user in production**.
+
+**Fix**, three parts:
+- **Named limiters instead of inline throttles** (`AppServiceProvider::boot()`). Named limiters key as `md5($limiterName.$key)`, so each gets its own bucket and nesting is safe. `api` = 120/min by user-id-or-IP (unchanged ceiling); `auth` = 20/min by IP on the login/register routes — deliberately generous, since it exists to blunt credential-stuffing across many accounts, not to police one user's typos. `routes/api.php` now uses `throttle:api` / `throttle:auth`.
+- **Per-account brute-force guard in `AuthController::login()`** (the Laravel Breeze pattern). Keyed by `email|ip` and — critically — **only failed attempts are counted**, with the counter **cleared on success**. 5 failures/minute locks that account-from-that-IP with a "try again in N seconds" message (`->status(429)`, so the existing frontend countdown UI keeps working). A user who simply logs in often is now never throttled; only repeatedly getting the password wrong throttles them. Scoping the key to the email as well as the IP means a shared campus IP can't lock out everyone.
+- **Regression tests** (`AuthTest`, 5 → 8 tests; suite 20 → 23, 89 assertions). The pre-existing rate-limit test passed *vacuously* — it fired 5 attempts and asserted only that the 6th was 429, which held true even with the broken shared counter — so it was tightened to assert the first five actually reach the credential check (422). New: `test_browsing_the_public_api_does_not_consume_the_login_limit` (the bug itself), `test_a_successful_login_clears_the_failed_attempt_counter`, `test_locking_one_account_does_not_lock_another`.
+
+**Verified**: live against a real server — 30 public browse requests followed by a first, correct-password login now returns **200** (it returned **429** before the fix); 6 wrong passwords still lock with a countdown; a correct password during lockout stays blocked; a second account on the same IP is unaffected; 3 typos → success → 3 typos → success proves the reset. The regression test was also run against the *old* routes config and correctly **fails** with the exact `429` the user reported, confirming it reproduces the bug rather than merely passing.
+
+### Dashboard statistics were wrong (counted archived theses) + tiles trimmed to what readers care about
+User report: *"why is there 22 in college? when there is only 19 in the collection? is the data shown in the statistic accurate?"* — it was not.
+
+**Root cause.** `CategoryController::index()` used a bare `Category::withCount('theses')` — **no status filter** — while `ThesisController::index()` hides `archived` from everyone and `restricted` from guests. Two sources, two different filters, both rendered on the same screen. With 19 active + 4 archived = 23 rows, the dashboard computed `College = (all 23) − (Graduate Studies 1) = 22`, i.e. it was counting 4 archived theses **no user can open**. The screen contradicted itself: "Total Items" (19, from the browse endpoint, correctly filtered) sat beside `GS 1 + College 22 = 23`.
+- **It also leaked into Browse**, which is worse — the category filter badge advertised **CAST 19** while clicking it returned **15**. Public-facing, on the most-used page.
+
+**Fix — counts (backend).** `/categories` now returns three explicit counts instead of one ambiguous one, because "how many theses are in this category" has three right answers depending on who asks: `theses_count` (every status — what **staff** manage, so Category/Collection Management is unchanged and still sees archived), `active_theses_count` (what a **guest** may open), `restricted_theses_count` (additionally openable once logged in). A reader's visible total is `active + (logged in ? restricted : 0)`, mirroring `ThesisController::index()`'s `$defaultStatuses` exactly. Counts are returned rather than resolved server-side so the response is identical for guests and members and can keep sharing one cache entry. Cache key bumped to `categories:index:v2` so a deploy doesn't serve 5 minutes of old-shape entries missing the new fields. `BrowsePage.jsx` (now `useAuth`-aware) and `DashboardPage.jsx` use the visible count; `CategoryManagementPage.jsx` deliberately keeps the total.
+
+**Fix — tiles (user chose "trim to 4 reader-focused tiles").** The old six were **Total Items / GS / College / Departments / My Bookmarks / Recently Read**. Problems beyond the bad numbers: GS-vs-College is an **org-chart split, not a reader's question** (nobody logs in asking "how many non-Graduate-Studies theses exist?"), "GS" was an unexplained acronym, "College" just meant "everything that isn't GS", **Departments said 11 while only 5 have any content** (6 led to blank pages), and "Recently Read" rendered `10+` because it was really "rows the API returned", not a count. Now four, each answering a question a reader actually has:
+- **Available to Read** — exactly what Browse shows (19).
+- **Departments** — only those with content (5).
+- **New in 30 Days** — gives a reason to come back.
+- **My Bookmarks** — personal.
+
+  ("Continue Reading" already exists as a panel directly below, so the Recently-Read tile was redundant.) New backend filter `?added_within_days=N` on `/theses` powers the New tile: the dashboard requests it with `per_page=1` and reads the paginator's `total`, so **the count inherits the visibility rules automatically** instead of being computed separately and drifting. Clamped to 1–365 so a hand-crafted `?added_within_days=999999` can't become a full-table scan.
+
+**Verified** live: `/categories` now reports CAST as all=19 / active=15; the Browse badge shows 15 and clicking CAST returns 15; `added_within_days=30` → 19, `=1` → 0. The dashboard is now internally consistent — the visible per-department counts (15+1+1+1+1) sum to exactly the 19 "Available to Read". Frontend builds clean. **Tests 23 → 26**: `test_category_counts_separate_visible_theses_from_archived_ones`, `test_the_category_badge_matches_what_opening_that_category_returns` (pins the badge to the list behind it — they're computed by different queries), `test_recently_added_filter_respects_visibility_and_the_window`.
+
+### Active Term is now editable by the Super Admin (was hardcoded in the navbar)
+User request: make the navbar's "Active Term" clickable and editable by the Super Admin — semester and school year — "so it is not locked in hard code and they are able to edit it whenever necessary."
+
+**Before**: `Layout.jsx` rendered the literal string `1st Semester AY 2026-2027`. Rolling over to a new semester meant a code edit and a frontend redeploy — every term, forever.
+
+**Backend**
+- New `settings` table (`key` PK / `value` / `updated_by` → users, nullOnDelete) — a general key/value store for values that must change at runtime rather than by redeploy. First tenant is the active term (keys `active_term.semester`, `active_term.school_year`).
+- New `App\Models\Setting` owns the term's shape: `get()`/`set()`, `activeTerm()` (SafeCache, 1h TTL, returns `{semester, school_year, label}`), `forgetActiveTerm()`, and the `SEMESTERS` whitelist (`1st Semester`, `2nd Semester`, `Summer`). The whitelist lives on the model — **not** in the controller or the frontend — so the dropdown, the validation rule, and the stored value cannot disagree about what a valid semester is.
+- **Fallback**: with no settings row (fresh install, wiped row) the term is *derived from today's date* against the PH academic calendar (school year starts ~August) rather than falling back to another hardcoded string that would itself go stale. Once a Super Admin sets a value, theirs always wins.
+- New `SettingController`: `GET /api/settings/active-term` is **public** (the navbar is visible to guests) and also returns the semester options; `PUT /api/settings/active-term` sits in the existing `role:super_admin` group. Writes invalidate the cache and are recorded in the audit log with the before → after label.
+- **School-year validation is two-stage on purpose**: the `^\d{4}-\d{4}$` regex only checks *shape*, and would happily accept `2026-2029` or a backwards `2027-2026`. A second rule enforces that the two years are consecutive.
+
+**Frontend**
+- New `ActiveTermBadge.jsx` (dropped into `Layout.jsx`, replacing the hardcoded span). Fetches the term on mount. For a Super Admin the badge becomes a button (pencil affordance, hover/focus outline) that opens a small popover — semester dropdown + starting-year input + a live "Will show as …" preview — with outside-click and Escape to dismiss, matching the notification dropdown beside it. Every other role, and guests, see the plain non-interactive badge.
+- **The editor asks only for the *starting* year and derives the second** (`2026` → `2026-2027`), which makes an invalid span impossible to type rather than something to validate after the fact. The backend still re-validates independently — the UI is convenience, not trust.
+- If the fetch fails the badge renders nothing instead of throwing an error banner across every page: the term is decoration, not function.
+- Styles added to `styles.css`; the popover sits at `z-index: 60` (above `.topbar`'s 50). The existing mobile rule that hides `.term-info` still applies, so the badge continues to disappear on phone widths as before.
+
+**Verified** live end-to-end: guest `GET` works; guest `PUT` → 401; student `PUT` → 403; super-admin `PUT` → 200 and the new label is immediately visible to guests (cache invalidation works despite the 1h TTL); `2026-2029`, `2027-2026`, and `Trimester` all → 422; the audit log recorded *"Super Admin changed the active term from "2nd Semester AY 2025-2026" to "1st Semester AY 2026-2027""*. Frontend builds clean. **Tests 26 → 34** (new `ActiveTermTest`): public read, default-when-unset, super-admin can change, change is audit-logged, guest 401, **student/teacher/staff all 403**, consecutive-year rule (incl. malformed shapes), semester whitelist.
+- *Gotcha captured*: the role loop initially failed with "no role named `teacher`" — Spatie caches the role table on first read, so roles created *after* a request has warmed that cache are invisible to `assignRole`. Fixed by creating all roles in `setUp()` before any request runs.
+
+### Search page merged into Browse (user spotted the redundancy as a guest)
+User, browsing as a guest: *"why is there a browse tab and a search tab when both of them just do the same thing"* — a correct instinct, and the investigation turned up a real bug behind it.
+
+**What the code actually did**
+- `BrowsePage` was already a **superset** of `SearchPage`: it hits the *same* `/search` endpoint when a query is present (falling back to `/theses` for the unfiltered listing), carries the same `QUICK_TAGS` chips, the same department/year filters — **plus pagination**, which `SearchPage` never had.
+- Worse, **two of `SearchPage`'s controls were dead**. It sent `year_from`, `year_to`, and `sort` to `/search`, but `SearchController` only validates `q`, `category_id`, `year_published`, and `SearchService` only ever reads those two filters. Laravel silently drops unknown query params, so a guest could set a year range or change the sort, see the results not move, and get no feedback. Browse was unaffected — it sends `year_published`, which *is* supported.
+- Net: the Search tab offered strictly **less** than Browse while lying about two of its filters. (Note the tab only ever appeared in the **guest** menu — signed-in users never saw it.)
+
+**Decision (user picked "merge"):** delete the page rather than build out an "advanced search" nobody asked for.
+- `SearchPage.jsx` **deleted**; removed from the nav in `Layout.jsx` and from the landing-page footer (which would otherwise have had two links to the same destination).
+- `/search` now **redirects to `/browse` preserving the query string** (`SearchRedirect` in `App.jsx`), so old links, bookmarks, and any external references still land on real results instead of a 404.
+- Nothing was lost: Browse already had the search box, the quick tags, and the filters. The dead year-range/sort controls died with the page.
+- **Search logging is unaffected** — Browse hits the same `/search` endpoint, so `AuditLog` still records every query and the "Recent Searches" panel and "Most Searched" report keep working.
+
+**Verified** by driving the real app as a guest (Playwright): the sidebar now lists only `["Browse"]`; `/search?q=nursing` → `/browse?q=nursing` with the term still in the box and the filter chip; `/search` (bare) → `/browse`; and `/search?q=students` lands on Browse showing **"About 4 results"** with real cards — proving the merged path actually searches, not just redirects. Frontend builds clean.
+
+### Landing page — real data, editable hero image, working department links
+User: the hero image is *"cut in half, only the left side is visible"*, the statistics should *"match real data that is stored"*, plus *"update anything else there that needs updating."*
+
+**Why the hero was cut.** `library-system.png` is **not a photo — it's a Facebook cover banner** (851×315, exactly FB's cover size) with its own headline ("Only the best is good enough."), the MDC seal, gold flourishes, and a contact strip with an email address baked in. It was being used as a full-bleed `background-size: cover` hero with the site's *own* headline layered on top. So it was simultaneously too small (upscaled ~2x), cropped (a designed layout can't survive `cover`), and fighting the page's own copy. No `background-position` tweak fixes that — the asset was the wrong kind of asset.
+
+**User's call (better than any option offered):** keep the banner, but let a **Super Admin swap the hero image from the UI**.
+- `Setting::LANDING_HERO_IMAGE` (`landing.hero_image_path`) reuses the existing `settings` table — no new migration.
+- New `LandingController`: `GET /api/landing` (**public** — this is the guest landing page) returns hero + stats + departments in one request; `POST/DELETE /api/landing/hero` sit in the existing `role:super_admin` group. Upload goes to the `public` disk (same pattern as category covers), is audit-logged, and **deletes the old file only after the new one commits**, so a failed upload can never leave the page with no hero.
+- Frontend: a "Change image / Reset" control pinned to the hero corner, rendered **only for `super_admin`**. Falls back to the bundled banner when unset.
+- Also **strengthened the hero scrim** (`rgba(12,20,45,.82→.62)`): the default banner's baked-in text now recedes to texture so the page's own headline is the only thing being read. A plain uploaded photo still looks like a normal hero.
+
+**Statistics were entirely fabricated.** The strip hardcoded *"2,052+ Total Items, 8 Departments, 1,847 Users, 14K+ Total Views"*. Reality: **19 / 11 / 9 / 55**. Now counted live. Only **Active** theses are counted — archived ones are out of the public collection and restricted ones can't be opened by the guests this page is written for, so counting either would advertise items a visitor cannot read (same rule as the earlier Browse-count fix). "Views" = `reading_history` rows (there is no `view_count` column; it's derived, and already deduplicated per 30-min session).
+
+**Department cards were fake too** — eight hardcoded departments with invented counts (*"412 items"*) against **eleven** real categories. Now rendered from the real categories with their real **category cover images** (`cover_image_path`, the ones set in Category Management) and real Active counts. A category with no cover gets a **brand-gradient panel**, not a stand-in photo — the obvious default (the MDC banner) has text baked in and read as a mistake when tiled across several departments. **Clicking a card now filters Browse** (`/browse?category_id={id}`), which BrowsePage already supported; it previously dumped every visitor on an unfiltered list.
+
+**Also fixed:** the "Citation Generator" card advertised *"APA, MLA, and Chicago"* — the system only generates **APA and MLA**. Corrected rather than left as a false claim in the shop window.
+
+**A real bug, caught only by rendering the page.** The landing payload is `SafeCache`d. Leaving an Eloquent **Collection** inside the cached array meant a serializing cache backend (redis/file/database — i.e. every real one) returned it as a `__PHP_Incomplete_Class`, which JSON-encoded to `{"__PHP_Incomplete_Class_Name":"Illuminate\Support\Collection"}` and blanked the page with `departments.map is not a function`. **It only failed on a cache HIT** — the first request always looked perfect, which is exactly why the initial `curl` check passed. Fixed by `->values()->all()`: cache plain arrays and scalars, never framework objects. (`SafeCache` *does* guard against incomplete classes, but only at the **top level**; here it was nested one level down inside an array.)
+
+**Verified** live (Playwright, real browser): stats render 19/11/9/55; all 11 departments show with real covers and counts; clicking CAST → `/browse?category_id=1` with the department filter pre-selected and **exactly 15 results**, matching the card. Hero upload gated correctly — guest 401, student 403, staff 403, non-image 422, super-admin 200 with the change immediately public; reset restores the default and removes the orphaned file. **Tests 34 → 41** (new `LandingTest`), including a regression test for the cache bug that **forces a `file` (serializing) cache store** — the suite's default `array` store does not serialize and could never have reproduced it. Confirmed the test fails on the old code with the exact production symptom.
+
+### No route back to the landing page from inside the app (found by the user)
+User: *"I cannot access the landing page unless I change the link when I'm logged in as super admin"* — and they were right; there was **no link to `/` anywhere in the app shell**, for any role. The sidebar brand was a plain `<div>`, and nothing else pointed home. This made the Super Admin's brand-new landing-page editor effectively unreachable: you had to hand-edit the URL to get to the page you were supposed to administer.
+
+- **Sidebar brand is now a link home** (`Layout.jsx`) — the convention on essentially every site, and the one people try first. Needed a small style reset (`color: inherit; text-decoration: none`) since it became an `<a>` inside a dark sidebar.
+- **Explicit "← Home" button in the topbar**, which is what the user actually asked for. Shown to **guests as well** — they were equally stranded inside the app shell on `/browse`. On phone widths the label drops and the arrow alone carries it, since the topbar is already crowded there.
+- **Knock-on bug this exposed**: the landing page's own navbar and hero CTA were hardcoded for guests — so a signed-in Super Admin who followed the new link home was greeted with **"Sign In" / "Get Started"**. Nobody had noticed because no signed-in user could reach the page. Both now switch to **"Go to Dashboard"** (routed to `/admin` or `/dashboard` by role) when someone is logged in.
+
+**Verified** live as a real Super Admin session (Playwright): the Home button renders in the topbar → clicking it lands on `/` → the "Change image" hero editor is present there, and the navbar/hero read "Go to Dashboard". Re-checked as a guest: still offered "Sign In / Get Started", still cannot see the hero editor, and the Home button works for them too.
+
+### Landing page: "Departments" → "Collections", Super-Admin-curated, and the last guest-only CTAs
+Three things the user caught in one pass.
+
+**1. "Browse by Department" was the wrong name.** The categories stopped being departments a while ago — *Faculty Research*, *Institutional Publications*, *Special Boholano Creations*, and *Special Collections* never were. Renamed throughout the landing page: the section is now **"Explore the Collections"** (`id="collections"`), the stat label is **Collections**, and the navbar and footer links follow. The API payload key was renamed `departments` → `collections` to match (safe — that endpoint is new this session and only the landing page consumes it).
+
+**2. The Super Admin now chooses which collections are featured.** New setting `landing.visible_categories` (JSON array of IDs) in the existing `settings` table — no migration. `PUT /api/landing/collections` sets the selection, `DELETE` clears it; both super-admin-only, both audit-logged, both bust the landing cache. A picker appears on the page itself (checkbox list + Save / Cancel / Show all), visible only to a Super Admin.
+- **Absent ≠ empty.** A missing setting means *"show them all"*; an empty array means *"show none"*. Conflating them would make a fresh install show nothing until someone opted in, and would make "hide everything" silently show everything. Both cases are covered by tests.
+- **"Show all" is a distinct action, not "tick every box"** — saving every current ID would freeze the list, leaving collections created *later* invisible until someone remembered to re-tick them. Clearing the setting keeps the page self-updating. There's a test for exactly that.
+- The picker loads the **full** category list from `/api/categories`, not the landing payload — the payload only contains what's *currently shown*, so picking from it could never re-add a hidden collection.
+- A corrupt/hand-edited setting value falls back to showing everything rather than blanking the section.
+- **The headline stat still counts every collection in the repository** (11), not just the featured ones. It's a fact about the archive; the grid below is a curated selection.
+
+**3. Signed-in users were still being told to "Sign In".** The bottom CTA offered *"Create Free Account" / "Sign In"* and the footer's Account column offered *"Sign In" / "Register"* — to someone already logged in. (Same class of bug as the navbar one fixed just before; these were the two remaining spots.) Both are now auth-aware: the CTA becomes **"Go to Dashboard" / "Browse Collections"** under a "Pick Up Where You Left Off" heading, and the footer shows **Dashboard / My Profile**.
+
+**Verified** live as a real Super Admin session (Playwright): heading reads "Explore the Collections", nav/stat labels updated, picker lists all 11 collections, selecting two renders exactly those two cards, "Show all" restores all 11; bottom CTA reads `["Go to Dashboard","Browse Collections"]` and the footer `["Dashboard","My Profile"]`. Re-checked as a guest: no picker, still `["Create Free Account","Sign In"]` and `["Sign In","Register"]`, all 11 cards. API gates re-checked directly: guest 401, student 403, staff 403, nonexistent category ID 422. **Tests 41 → 47.**
+
+### Audit log export → CSV; search terms stored as data; "Clear" renamed
+User asked which of the PDF exports would be better as CSV. Audit of all seven:
+
+| Export | Rows | Verdict |
+|---|---|---|
+| **Audit Log** | **unbounded — grows forever** | **→ CSV** |
+| Dashboard Summary | 4 (fixed) | stays PDF |
+| Most Cited | ≤10 (`limit(10)`) | stays PDF |
+| Most Searched | ≤10 (`take(10)`) | stays PDF |
+| Users Online | ≤24 (hours in a day) | stays PDF |
+| By Department | = category count | stays PDF |
+| By Year | +1 per year | stays PDF |
+
+The six reports are small, fixed-size summaries meant to be *read*, printed, and pasted into the capstone documentation — CSV would be a downgrade. The audit log is the only one that is a **record** rather than a report, and the only unbounded one.
+
+**Audit log now exports as streamed CSV** (`AuditLogController::exportCsv`, replacing `exportPdf`; `pdf_audit.blade.php` deleted).
+- **Memory.** The old code did `$query->get()` and handed everything to DomPDF, which buffers the whole rendered document. **Measured on 20,000 rows: hydrating them costs ~46.6 MB before DomPDF even starts; streaming costs ~0.1 MB.** Same failure class as the 150MB-upload OOM. A 20k-row CSV now downloads in ~1.8 s.
+- **`lazyByIdDesc()`, not `lazy()`.** The log is written constantly (every view/search/login appends). `lazy()` paginates by OFFSET, so a single insert mid-export shifts every later offset and the CSV emits **duplicate rows**. Keyset paging (`WHERE id < last_id`) is immune. Verified: 0 duplicate lines across a 20k export.
+- **CSV formula injection closed.** Moving to CSV *created* this: Excel/LibreOffice/Sheets execute a cell starting with `=`, `+`, `-` or `@` as a formula, and account names and search terms reach the file verbatim. Registering as `=cmd|'/c calc'!A0` would plant a live formula that fires when an admin opens the export — the attacker never touches the admin's machine. Confirmed exploitable, then fixed (`csvSafe()` prefixes a `'`), then confirmed inert. The payload is still *recorded* — an audit log must not silently rewrite history.
+- **UTF-8 BOM** so Excel doesn't mangle non-ASCII names/terms; **`ID` column** added because two genuinely distinct entries can share every other column (the same person searching the same term twice in one second) and an audit record must stay distinguishable and de-dupable.
+
+**Search terms are now structured data, not a parsed sentence.** "Most Searched Keywords" recovered the term with `preg_match('/searched for: (.+)/')` against the audit log's *display* description — and the per-user "recent searches" list did the same thing independently. Reword that sentence for any reason and both would keep rendering, silently, with wrong data. New nullable `audit_logs.metadata` JSON column (migration backfills the existing 28 search rows, so no history is lost); `SearchController` writes `['query' => …]`; a single `AuditLog::searchQuery()` accessor reads it, with the regex demoted to a fallback for legacy rows. Both call sites now use the accessor.
+
+**The "Clear" button in Audit Logs.** It was only a **date-range preset** — it cleared the date filter and nothing else. But sitting directly above a list of audit entries, "Clear" reads as *delete the logs*, which is the one irreversible thing you must never do to an audit trail. Renamed to **"All Time"** with a tooltip stating it doesn't delete anything. (There is no delete endpoint for audit logs, and there shouldn't be.)
+
+**Tests 47 → 54.** `AuditLogExportTest` rewritten (it previously asserted the response *was* a PDF): CSV not PDF, BOM present, permission gate, formula-injection regression, row-distinguishability, action filter. New `SearchTermLoggingTest`: term stored structurally, **rewording the log sentence no longer corrupts the term**, legacy rows still resolve via the fallback, and Most Searched counts real terms.
+
+### Audit log scaling — indexes, index-usable filters, cheap pagination, and CSV-archived retention
+User asked what happens as `audit_logs` grows forever. Measured on **200,000 synthetic rows** against the real schema; the Audit Logs *page* dies long before disk does (~160 bytes/row, so 5M rows is only ~750 MB).
+
+| Operation | Before | After |
+|---|---|---|
+| Filter by action | 223 ms | **69 ms** (index) |
+| Filter by date | 193 ms | **25 ms** (range vs `whereDate`) |
+| `paginate()` = `COUNT(*)` + rows | 43 ms | **3 ms** (cached count) |
+| Jump to page 5,000 (offset 100k) | 462 ms | unchanged — offset paging degrades with depth |
+
+**Tier 1 — three separate problems, all fixed:**
+- **No indexes at all.** `audit_logs` had only the primary key and the `user_id` FK — nothing on `created_at` or `action`, so every sort and filter on the one unbounded table was a full scan. Added `(created_at)`, `(action, created_at)`, `(user_id, created_at)`. `created_at` leads each composite because the page *always* sorts by it, filter or not.
+- **`whereDate()` cannot use an index.** It compiles to `DATE(created_at) <= ?`, forcing a per-row function evaluation. Replaced with range comparisons everywhere (audit list, audit export, most-searched, users-online, most-cited). **The trap this hides:** the obvious replacement `where('created_at','<=',$to)` means *midnight starting* that day and silently drops every entry logged during it. New `App\Support\DateRange` makes the upper bound exclusive-next-midnight; verified an entry at 23:58 on the last day is **INCLUDED** by `DateRange` and **DROPPED** by the naive version. Two regression tests pin both boundaries.
+- **`paginate()` ran `COUNT(*)` on the whole table for every page load**, purely to render "N entries" — a cost proportional to table size that no index removes. Now served from a 30-second `SafeCache` keyed on the filters (an append-only log tolerates a few-second-stale total; a full scan per request does not).
+
+**Tier 2 — retention, archiving to CSV before deletion (user's request).**
+The table mixes two things with different lifetimes, which is *why* it can't just be pruned: **security/administrative** events (logins, permission grants, uploads, deletions — an auditor will ask for these) and **usage analytics** (individual thesis views and searches — the overwhelming bulk, and nobody needs one view event from 14 months ago).
+- New `config/audit.php`: only `view_thesis` and `search` are ever pruned (`AUDIT_RETENTION_DAYS`, default 365). **Deliberately not login/logout** — high volume, but the first thing anyone asks for in an incident.
+- New `php artisan audit:prune` (`--days`, `--dry-run`, `--force`), scheduled **monthly on the 1st at 03:00**.
+- **Nothing is destroyed outright.** Rows are streamed to a CSV archive on the `audit.archive.disk`, the archive is then **read back off the disk and its rows counted**, and only if that matches does anything get deleted. Trusting the writer's own return value would miss the case this exists to catch — a disk that accepts a write and silently keeps nothing.
+- The prune **pins `max(id)` before archiving**, so "what was archived" and "what gets deleted" are provably the same set.
+- **The prune is itself audited** (`prune_audit_logs`, with row count + archive path in `metadata`) — and that action is not in the prunable list, so a later run never erases the record of the earlier one.
+- Archives share `App\Support\AuditCsv` with the on-demand export, so an archive and an export are byte-identical in format — **including the formula-injection guard, which matters more here, not less: the archive is the last surviving copy of the row.**
+- **Verified end-to-end**: seeded 500 old analytics + 20 old logins + 30 recent views → dry run reported exactly 500 candidates and changed nothing → real run archived 500 rows to CSV (BOM, 500 recoverable rows, correct columns) and deleted exactly those, leaving all 20 logins and all 30 recent views intact, and recording the prune itself.
+
+**Bug found while testing (would have made the tests vacuous).** `AuditLog::$fillable` omitted `created_at`, so `AuditLog::create(['created_at' => now()->subDays(400)])` **silently discarded it** and the DB default stamped the row `now()`. Every "year-old" row a test tried to create was one second old. The earlier CLI verification only worked because it used raw `DB::table()` inserts, which bypass mass-assignment. Added `created_at` to `$fillable`.
+
+**Tests 55 → 65.** New `AuditPruneTest` (only analytics pruned; security entries survive at any age; archive written and complete before deletion; dry run inert; prune is audited; archive neutralises formula injection) and `AuditLogFilterTest` (both date boundaries, export agrees with the list, cached total still respects the filter).
+
+**Still open, deliberately:** deep-offset pagination (page 5,000 = 462 ms). Not fixed because nobody pages 5,000 pages deep through an audit log — they filter. Keyset pagination would fix it if that ever changes.
 
 ---
 
@@ -485,7 +663,7 @@ Organized by capability area, describing **the system as it stands today** — n
 - Email/password login issuing a bearer token valid for 7 days (configurable) before requiring re-login.
 - Self-service password change from the account's own Profile; admin-assisted password reset for any account (Staff/Super Admin only) — by deliberate design there is no self-service "forgot password" email flow.
 - Password policy — minimum 8 characters, must include upper-case, lower-case, and a number — enforced identically everywhere a password is set (registration, self change, admin-created accounts, admin resets).
-- Login and registration are rate-limited (5 attempts/minute) with a live "try again in Ns" countdown shown once triggered; every other endpoint is rate-limited too (120 requests/minute) as a general abuse/scraping guard.
+- Login is protected against password brute-forcing: 5 **failed** attempts per minute locks that account (from that IP) with a live "try again in Ns" countdown. Only failures count and a successful login resets the counter, so normal use is never throttled. The auth endpoints also carry a 20/minute per-IP ceiling, and every other endpoint is rate-limited at 120 requests/minute as a general abuse/scraping guard.
 - Profile picture upload (2MB max) shown everywhere an avatar appears (sidebar, admin user table, profile page), falling back to initials when none is set.
 
 ### 6.2 Roles & Access Control
@@ -514,8 +692,10 @@ Organized by capability area, describing **the system as it stands today** — n
 - **Human-reviewed metadata refresh** — replacing a file no longer leaves the *previous* file's abstract/keywords silently in place. The new file is re-read and the edit page surfaces what was detected vs. what's on record (flagging, e.g., an abstract the new file no longer contains), with per-field **Use detected** / **Clear** actions. Nothing is ever auto-overwritten; a genuinely blank field still auto-fills. A **"Re-extract from current file"** button re-runs detection on demand at any time.
 
 ### 6.5 Search & Browse
+- **Searching and browsing are one screen, not two.** Browse is the single entry point: with an empty box it lists the collection; type a query and the same screen runs a full-text search. (There used to be a separate Search tab; it duplicated Browse while offering less, so it was merged — see §3.)
 - Full-text search across title, authors, adviser, abstract, and keywords — typo-tolerant and relevance-ranked, with an automatic fallback so search never goes fully down if the search engine is unavailable (just temporarily loses typo-tolerance).
-- Filterable by department/category and publication year; sortable by relevance, newest, or most-viewed.
+- Filterable by department/category and publication year; sortable by relevance, newest, or most-viewed; results are paginated.
+- Suggested quick-search tags for common topics, so a visitor with nothing specific in mind still has a way in.
 - Guests can search/browse Active theses; logged-in accounts additionally see Restricted items.
 - Browse organized by department/category with cover images and per-item view counts.
 - "Related theses" on a thesis's detail page, ranked by actual keyword/abstract content overlap with the item being viewed, not just "same category."
@@ -557,6 +737,9 @@ Organized by capability area, describing **the system as it stands today** — n
 - User account management — create Staff/Super Admin accounts, activate/deactivate any account, delete accounts (subject to the role hierarchy in §6.2), grant/revoke the two individually-grantable permissions, admin-assisted password reset.
 - Collection management — the full thesis list with search/filter, restrict/unrestrict, archive/unarchive, permission-gated delete, plus the file-replace/version-history tools from §6.3.
 - Category management with cover images.
+- **Active academic term** — the semester and school year shown in the top bar are editable in place by a Super Admin (click the badge, pick the semester, set the starting year). No code change or redeploy is needed to roll over to a new term. Every other role, and guests, see it as read-only text. Changes are recorded in the audit trail. Falls back to a term derived from the current date if it has never been set.
+- **Landing page hero image** — the main image on the public landing page is uploadable by a Super Admin from the page itself, with a one-click reset to the default. Audit-logged. Lets the front of the site be re-branded without a code change or redeploy.
+- **Featured collections** — a Super Admin chooses, from the landing page itself, which collections appear in its "Explore the Collections" grid, with a "Show all" reset that also picks up any collection created later. Audit-logged. Every collection is shown by default, so a fresh install needs no setup.
 
 ### 6.12 Performance & Reliability
 - Every non-database service degrades gracefully instead of breaking the app: the search engine going down falls back to database search automatically; the cache layer going down just means slightly slower responses, computed fresh, never a failure; health checks for both are themselves cached briefly so an actual outage doesn't add a repeated timeout tax to every request.
@@ -568,7 +751,7 @@ Organized by capability area, describing **the system as it stands today** — n
 - The secure PDF viewer's thumbnail rail and control toolbar are both mobile-aware (rail closed by default on phones, toolbar scrolls instead of clipping controls off-screen).
 
 ### 6.14 Security Hardening
-- Rate limiting on every endpoint, with a much stricter limit specifically on login/registration to blunt password brute-forcing.
+- Rate limiting on every endpoint, plus a per-account failed-attempt lockout on login to blunt password brute-forcing without penalising legitimate sign-ins.
 - Authentication tokens expire automatically (7 days) instead of remaining valid indefinitely.
 - Password complexity enforced (length + mixed case + a number) everywhere a password is set.
 - No user-supplied content (thesis titles, account names) can execute as script in another user's browser — all dynamic text rendering is auto-escaped, nowhere raw HTML.
@@ -577,7 +760,7 @@ Organized by capability area, describing **the system as it stands today** — n
 - **HTTPS enforced in production** (with reverse-proxy trust, so signed PDF-viewer URLs stay correct), and CORS locked to the configured frontend origin rather than any localhost.
 
 ### 6.15 Quality Assurance
-- Automated test suite (20 tests) covering the critical paths: authentication + password policy + login rate-limiting, role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users, and the full file-replace → version-restore → checksum lifecycle. Run with `php artisan test`.
+- Automated test suite (65 tests) covering the critical paths: authentication + password policy + login rate-limiting (including the browsing-must-not-consume-the-login-limit regression), role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users (including that displayed counts never advertise theses a user cannot open), Super-Admin-only editing of the active term and the landing hero image, the public landing payload (including a cache-serialization regression test that runs against a *serializing* cache store, since the suite's default in-memory store cannot reproduce it), and the full file-replace → version-restore → checksum lifecycle. Run with `php artisan test`.
 
 ---
 
@@ -610,7 +793,7 @@ From the deploy-readiness diagnostic. **Tier 1 = must-do before going live; Tier
 - [ ] Meilisearch + queue worker (if async) supervised (NSSM on Windows / systemd on Linux).
 
 ### Tier 3 — quality / repository completeness
-- [x] **Automated tests** — DONE: 20 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility, file-versioning + checksum). Room to grow (search, reports, citations) but the critical paths are covered.
+- [x] **Automated tests** — DONE: 65 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility + displayed counts, active-term settings, landing payload + hero upload + cache-serialization regression, file-versioning + checksum). Room to grow (search, reports, citations) but the critical paths are covered. They earned their keep: the suite is what pinned down the login-429 bug and the archived-theses miscount, and now guards against both returning.
 - [x] **Timezone** — DONE: `Asia/Manila`, env-driven (`APP_TIMEZONE`). REMAINING (deploy): the prod template already sets it — just confirm it's applied on the fresh DB before go-live.
 - [x] **Fixity/checksums (#12)** — DONE: SHA-256 per file + `theses:verify-checksums` (weekly). REMAINING (deploy): the weekly schedule fires via the same `schedule:run` cron as Tier 2.
 - [x] **Load-test PDF-viewing** — DONE (dev floor measured): ~34ms/stamp, ~7–9 req/s at OPcache-off/4-worker; see §3 for the full interpretation + prod extrapolation. REMAINING: re-run against the deployed FPM+OPcache server with a large scanned thesis to get the real production ceiling.
