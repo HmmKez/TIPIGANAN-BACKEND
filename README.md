@@ -135,9 +135,15 @@ Also optional — without it, the app just recomputes things like the Reports & 
 
 If Redis/Memurai isn't running, `CACHE_STORE=redis` is still safe to leave set — the app detects the failure once, skips retrying it for the next 15 seconds, and just computes everything fresh instead.
 
-## Using the Audit Log PDF Export
+## Using the Audit Log CSV Export
 
-Only users with the `export_reports` permission can download the audit log as a PDF.
+The audit log exports as **CSV, not PDF** — unlike the analytics reports, which
+are still PDFs. It is the only export that grows without bound (a row per login,
+view and search), and it is a *record* rather than a report: you filter, sort and
+pivot it in a spreadsheet. It is streamed, so the download stays flat in memory
+however large the log gets.
+
+Only users with the `export_reports` permission can download it.
 
 ### Required permission
 - Staff and super admin accounts seeded by the project already have this permission.
@@ -167,7 +173,7 @@ Login first to get a Sanctum token, then call the export endpoint:
 ```bash
 curl -X GET "http://localhost:8000/api/audit-logs/export?period=week" \
   -H "Authorization: Bearer YOUR_TOKEN" \
-  -o audit-log.pdf
+  -o audit-log.csv
 ```
 
 Custom date range example:
@@ -178,10 +184,46 @@ curl -G "http://localhost:8000/api/audit-logs/export" \
   --data-urlencode "period=custom" \
   --data-urlencode "date_from=2026-07-01" \
   --data-urlencode "date_to=2026-07-02" \
-  -o audit-log.pdf
+  -o audit-log.csv
 ```
 
 If the user does not have the `export_reports` permission, the API will return a `403` response.
+
+### Columns
+`ID, Timestamp, User, Role, Action, Description, IP Address`
+
+The ID is there because two genuinely distinct entries can otherwise be
+identical — the same person searching the same term twice in one second — and an
+audit record has to stay distinguishable.
+
+### If the timestamps show as `#####` in Excel
+That is Excel, not the file: it recognises the column as a date and fills the
+cell with hashes when the column is too narrow to render one. Double-click the
+right edge of the column header to auto-fit. A plain CSV carries no column
+widths, so there is nothing to set on the export side.
+
+## Audit log retention (`audit:prune`)
+
+`audit_logs` is the one table that grows forever. Left alone it reaches millions
+of rows and the Audit Logs page — and the reports built on it — slow to a crawl.
+
+```bash
+php artisan audit:prune --dry-run   # report what would go, change nothing
+php artisan audit:prune             # archive to CSV, verify, then delete
+```
+
+- **Only usage analytics are pruned** (`view_thesis`, `search`), after
+  `AUDIT_RETENTION_DAYS` (default 365). Security and administrative entries —
+  logins, permission grants, uploads, deletions — are **never** pruned
+  automatically. They are what an auditor asks for.
+- **Nothing is destroyed outright.** Rows are archived to CSV on
+  `AUDIT_ARCHIVE_DISK` (default `local` → `storage/app/private/audit-archives`),
+  the archive is read back off the disk and its rows counted, and only if that
+  matches does anything get deleted.
+- The prune is itself recorded in the audit log, and that entry is not prunable.
+- Runs monthly via the scheduler (see `routes/console.php`), which needs the one
+  cron entry from the deploy checklist. Until that cron exists it never fires on
+  its own — run it by hand if the table gets large.
 
 ## Using the Report PDF Export
 
@@ -190,8 +232,11 @@ Only users with the `export_reports` permission can download reports as a PDF.
 ### Endpoint
 - `GET /api/reports/export`
 
+These stay PDF (unlike the audit log above): each one is a small, fixed-size
+summary meant to be read and printed — the largest is 24 rows.
+
 ### Query parameters
-- `report=dashboard|most-cited|by-department|by-year|most-searched|most-active|peak-hours`
+- `report=dashboard|most-cited|by-department|by-year|most-searched|users-online`
 - `date_from` (optional) — required for custom filtering ranges if used with report-specific logic
 - `date_to` (optional) — required for custom filtering ranges if used with report-specific logic
 
@@ -213,15 +258,15 @@ curl -X GET "http://localhost:8000/api/reports/export?report=most-cited" \
   -o report-most-cited.pdf
 ```
 
-Most active users export with date range:
+Users-online export with date range:
 
 ```bash
 curl -G "http://localhost:8000/api/reports/export" \
   -H "Authorization: Bearer YOUR_TOKEN" \
-  --data-urlencode "report=most-active" \
+  --data-urlencode "report=users-online" \
   --data-urlencode "date_from=2026-07-01" \
   --data-urlencode "date_to=2026-07-02" \
-  -o report-most-active.pdf
+  -o report-users-online.pdf
 ```
 
 If the user does not have the `export_reports` permission, the API will return a `403` response.

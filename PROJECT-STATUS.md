@@ -30,8 +30,29 @@
 - **Frontend**: `C:\Users\conch\Codes\CAPSTONE\tipiganan-frontend` (React + Vite, Axios)
 - **Team guide / blueprint source docs**: `C:\Users\conch\Desktop\CAPSTONE\*.pdf`
 - **Team**: Group 7 — Concha, Esto, Mendez, Miano
-- **Both repos are on `dev`, and everything is committed and pushed to `origin/dev`** (verified clean as of 2026-07-12 — 0 uncommitted files on both, local `HEAD` == `origin/dev`). The session's work went up as: feature coverage (tests), production readiness, file versioning/OCR review/fixity/avatars, the capstone functionalities PDF generator, and the 150MB upload raise. Nothing is left sitting in the working tree.
-- **Teammates pulling this**: they must be on the `dev` branch (not `main`). After `git pull`: backend needs `composer install`, `npm install` (the backend has its own package.json for the Node OCR pipeline — this trips people up), **`php artisan migrate`** (critical — new `checksum`/`avatar_path` columns + `thesis_file_versions` table + indexes), and `php artisan config:clear`. Frontend needs only `npm install`. They must also add **`APP_TIMEZONE=Asia/Manila`** to their existing `.env` (it's the one new key with no safe code default — without it they silently run on UTC and hourly reports read 8h off). Do NOT tell them to overwrite `.env` with `.env.example` — that wipes their DB credentials.
+- **Both repos are on `dev`, and everything is committed and pushed to `origin/dev`** (verified clean as of 2026-07-13 — 0 uncommitted files on both, local `HEAD` == `origin/dev`). Backend `d06b362 → ba04202`; frontend `f327598 → 4cddb0e`.
+
+### Teammates pulling this — what they actually need
+
+They must be on the **`dev`** branch (not `main`). `git pull`, then:
+
+| | Backend | Frontend |
+|---|---|---|
+| Dependencies | `composer install` + `npm install` — the backend has its **own** `package.json` for the Node OCR pipeline, which trips people up. **No new deps were added this session**, so this is a no-op unless they're behind. | `npm install` (no new deps either) |
+| Database | **`php artisan migrate`** — see below. This is the step people skip. | — |
+| Config | **`php artisan config:clear`** — there is a new config file (`config/audit.php`) and it will not be picked up from a cached config. | — |
+
+**Migrations in this push (3):**
+- `create_settings_table` — the Super-Admin-editable Active Term, landing hero image, and featured collections all live here.
+- `add_metadata_to_audit_logs_table` — structured search terms. **Also backfills existing rows**, so it is safe (and necessary) to run against a populated database.
+- `add_indexes_to_audit_logs_table` — `(created_at)`, `(action, created_at)`, `(user_id, created_at)`. On a large `audit_logs` this one takes a moment.
+
+**`.env` keys:**
+- `AUDIT_RETENTION_DAYS=365` and `AUDIT_ARCHIVE_DISK=local` are new, but **both have safe defaults in code** (`config/audit.php`), so nothing breaks if a teammate doesn't add them. Adding them is only needed to *change* the retention window.
+- **`APP_TIMEZONE=Asia/Manila` is still the one key that genuinely must be added** to an existing `.env` — its code default is `UTC`, so without it they silently run 8h off and the hourly reports are wrong.
+- **Never tell them to overwrite `.env` with `.env.example`** — that wipes their DB credentials. Add the missing keys by hand.
+
+**Nothing else is required.** Meilisearch and Redis remain optional (the app degrades gracefully without either), and the new features work on a plain `composer install` + `migrate`.
 
 ---
 
