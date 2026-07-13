@@ -56,9 +56,10 @@ class LandingController extends Controller
             // breaks on the second request. Cache plain arrays and scalars,
             // never framework objects. (SafeCache guards against this, but only
             // at the top level; here it would be nested inside an array.)
-            $collections = $query->get(['id', 'name', 'cover_image_path'])
+            $collections = $query->get(['id', 'code', 'name', 'cover_image_path'])
                 ->map(fn ($c) => [
                     'id'               => $c->id,
+                    'code'             => $c->code,
                     'name'             => $c->name,
                     'cover_image_path' => $c->cover_image_path,
                     'total'            => $c->active_theses_count,

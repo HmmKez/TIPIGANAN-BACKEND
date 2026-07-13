@@ -46,7 +46,13 @@ class SearchService
             // Scout hydrates full models from the DB after Meilisearch
             // returns matching IDs — query() customizes that hydration
             // query, same views_count the Browse page relies on.
-            ->query(fn($q) => $q->withCount(['readingHistory as views_count']));
+            //
+            // `category` must be eager-loaded here too. It wasn't, so the moment
+            // a user typed a query, every result card silently lost its
+            // department tag, its cover image and its icon — while the same
+            // cards showed all three when browsing without a query, because
+            // /theses does load the relation.
+            ->query(fn ($q) => $q->with('category')->withCount(['readingHistory as views_count']));
 
         if (!empty($filters['category_id'])) {
             $builder->where('category_id', (int) $filters['category_id']);
@@ -87,7 +93,11 @@ class SearchService
     {
         $statuses = $includeRestricted ? ['active', 'restricted'] : ['active'];
 
+        // Same eager-load as the Meilisearch path above — the fallback must
+        // return the same shape, or search results look different depending on
+        // whether the search engine happens to be up.
         $builder = Thesis::query()
+            ->with('category')
             ->withCount(['readingHistory as views_count'])
             ->whereIn('status', $statuses)
             ->where(function ($q) use ($query) {

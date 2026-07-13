@@ -65,12 +65,17 @@ class CategoryController extends Controller
     // Staff and above only
     public function store(Request $request)
     {
-        $request->validate([
+        // The code is UNIQUE and typed by a human. It used to be invented from
+        // the name (`name.slice(0, 4)`), which collided — CABM-B and CABM-H both
+        // became "CABM". Two collections cannot share an identifier.
+        $validated = $request->validate([
             'name' => 'required|string|unique:categories,name',
+            'code' => ['required', 'string', 'max:16', 'regex:/^[A-Za-z0-9\-]+$/', 'unique:categories,code'],
         ]);
 
         $category = Category::create([
-            'name'       => $request->name,
+            'name'       => $validated['name'],
+            'code'       => strtoupper($validated['code']),
             'created_by' => $request->user()->id,
         ]);
 
@@ -92,12 +97,14 @@ class CategoryController extends Controller
     {
         $category = Category::findOrFail($id);
 
-        $request->validate([
+        $validated = $request->validate([
             'name' => 'required|string|unique:categories,name,' . $id,
+            'code' => ['required', 'string', 'max:16', 'regex:/^[A-Za-z0-9\-]+$/', 'unique:categories,code,' . $id],
         ]);
 
         $category->update([
-            'name' => $request->name,
+            'name' => $validated['name'],
+            'code' => strtoupper($validated['code']),
         ]);
 
         AuditLog::create([

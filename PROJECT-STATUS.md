@@ -46,6 +46,7 @@ They must be on the **`dev`** branch (not `main`). `git pull`, then:
 - `create_settings_table` — the Super-Admin-editable Active Term, landing hero image, and featured collections all live here.
 - `add_metadata_to_audit_logs_table` — structured search terms. **Also backfills existing rows**, so it is safe (and necessary) to run against a populated database.
 - `add_indexes_to_audit_logs_table` — `(created_at)`, `(action, created_at)`, `(user_id, created_at)`. On a large `audit_logs` this one takes a moment.
+- `add_code_to_categories_table` — the short category code (CAST, CABM-B, IP). **Backfills** a code for every existing category and then adds the unique index, so it is safe on a populated DB. If a teammate's install has categories whose derived codes would collide, the migration fails loudly rather than landing duplicates — fix the names and re-run.
 
 **`.env` keys:**
 - `AUDIT_RETENTION_DAYS=365` and `AUDIT_ARCHIVE_DISK=local` are new, but **both have safe defaults in code** (`config/audit.php`), so nothing breaks if a teammate doesn't add them. Adding them is only needed to *change* the retention window.
@@ -626,6 +627,33 @@ The table mixes two things with different lifetimes, which is *why* it can't jus
 
 **Still open, deliberately:** deep-offset pagination (page 5,000 = 462 ms). Not fixed because nobody pages 5,000 pages deep through an audit log — they filter. Keyset pagination would fix it if that ever changes.
 
+### Category codes — a real field, because the invented one collided
+User, on Browse: the category tag reads "CAST" on some items and "INSTITUTIONAL PUBLICATIONS" on others, and opening one shows *"CAST — CAST"* or *"INST — INSTITUTIONAL PUBLICATIONS"*. Correct on both counts, and the underlying defect was worse than the display.
+
+**Cause.** No category had a code, so the frontend invented one from the *name*, differently on each page: `ThesisDetail` used `name.slice(0, 4).toUpperCase()`, `BrowsePage` used `name.split(/[\s—-]/)[0]`. A name that was already an acronym came back duplicated (`CAST — CAST`); a full name came back as a stub (`INST`).
+
+**And the invented code was not unique** — which is the part that actually mattered:
+
+| Category | Invented code |
+|---|---|
+| CABM-B | **CABM** |
+| CABM-H | **CABM** ← same code, different collection |
+| Special Collections | **SPEC** |
+| Special Boholano Creations | **SPEC** ← same code, different collection |
+
+Two pairs of distinct collections shared one identifier, one icon and one colour. `DEPT_META` also keyed on `GS`/`SPC`, which matched **nothing** that existed, so three categories silently got the fallback icon.
+
+**Fix (user chose the real field over papering over the display).**
+- New `categories.code` (short, **unique**, `max:16`, `[A-Za-z0-9-]`), authored in Category Management alongside the full name. Required on create/update, uppercased server-side.
+- Migration backfills existing rows: a name that is already a short token becomes the code as-is (`CAST`, `CABM-B`); a multi-word name becomes its initials (`Institutional Publications` → `IP`, `Special Boholano Creations` → `SBC`). Collisions are resolved with a numeric suffix, and the unique index is added **after** the backfill so a collision fails the migration rather than landing silently. Verified: all 11 codes unique, CABM-B/CABM-H and SC/SBC finally distinct.
+- New `src/utils/category.js` is the single place display text is decided (`categoryCode` / `categoryName` / `categoryLabel`). **Nothing derives a code any more.** `categoryLabel` collapses to just the name when code and name are the same word, so `CAST — CAST` cannot come back.
+- Item tags across Browse and Bookmarks now show the **code** (short and uniform) with the full name on hover, instead of a mix of `CAST` and `INSTITUTIONAL PUBLICATIONS`. `DEPT_META` is keyed on the real codes and every category has an entry.
+- Fixed while here: `ThesisDetail`'s **related-thesis tags fell back to the code of the thesis being viewed**, so a related item from another collection was labelled with the wrong department entirely.
+
+**Pre-existing bug this surfaced.** `/api/search` never eager-loaded `category` — on *either* the Meilisearch or the MySQL-fallback path. So the moment a user typed a query, every result card lost its department tag, its cover image and its icon, while the identical cards showed all three when browsing without a query. Both paths now load it, and there's a test.
+
+**Tests 65 → 71** (`CategoryCodeTest`): code required; **two categories cannot share a code** (the CABM-B/CABM-H case, asserted directly); stored uppercase; junk characters rejected; editing a category keeps its own code available; search results carry their category.
+
 ---
 
 ## 4. Known Issues / Explicitly Not Done
@@ -781,7 +809,7 @@ Organized by capability area, describing **the system as it stands today** — n
 - **HTTPS enforced in production** (with reverse-proxy trust, so signed PDF-viewer URLs stay correct), and CORS locked to the configured frontend origin rather than any localhost.
 
 ### 6.15 Quality Assurance
-- Automated test suite (65 tests) covering the critical paths: authentication + password policy + login rate-limiting (including the browsing-must-not-consume-the-login-limit regression), role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users (including that displayed counts never advertise theses a user cannot open), Super-Admin-only editing of the active term and the landing hero image, the public landing payload (including a cache-serialization regression test that runs against a *serializing* cache store, since the suite's default in-memory store cannot reproduce it), and the full file-replace → version-restore → checksum lifecycle. Run with `php artisan test`.
+- Automated test suite (71 tests) covering the critical paths: authentication + password policy + login rate-limiting (including the browsing-must-not-consume-the-login-limit regression), role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users (including that displayed counts never advertise theses a user cannot open), Super-Admin-only editing of the active term and the landing hero image, the public landing payload (including a cache-serialization regression test that runs against a *serializing* cache store, since the suite's default in-memory store cannot reproduce it), and the full file-replace → version-restore → checksum lifecycle. Run with `php artisan test`.
 
 ---
 
@@ -814,7 +842,7 @@ From the deploy-readiness diagnostic. **Tier 1 = must-do before going live; Tier
 - [ ] Meilisearch + queue worker (if async) supervised (NSSM on Windows / systemd on Linux).
 
 ### Tier 3 — quality / repository completeness
-- [x] **Automated tests** — DONE: 65 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility + displayed counts, active-term settings, landing payload + hero upload + cache-serialization regression, file-versioning + checksum). Room to grow (search, reports, citations) but the critical paths are covered. They earned their keep: the suite is what pinned down the login-429 bug and the archived-theses miscount, and now guards against both returning.
+- [x] **Automated tests** — DONE: 71 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility + displayed counts, active-term settings, landing payload + hero upload + cache-serialization regression, file-versioning + checksum). Room to grow (search, reports, citations) but the critical paths are covered. They earned their keep: the suite is what pinned down the login-429 bug and the archived-theses miscount, and now guards against both returning.
 - [x] **Timezone** — DONE: `Asia/Manila`, env-driven (`APP_TIMEZONE`). REMAINING (deploy): the prod template already sets it — just confirm it's applied on the fresh DB before go-live.
 - [x] **Fixity/checksums (#12)** — DONE: SHA-256 per file + `theses:verify-checksums` (weekly). REMAINING (deploy): the weekly schedule fires via the same `schedule:run` cron as Tier 2.
 - [x] **Load-test PDF-viewing** — DONE (dev floor measured): ~34ms/stamp, ~7–9 req/s at OPcache-off/4-worker; see §3 for the full interpretation + prod extrapolation. REMAINING: re-run against the deployed FPM+OPcache server with a large scanned thesis to get the real production ceiling.
