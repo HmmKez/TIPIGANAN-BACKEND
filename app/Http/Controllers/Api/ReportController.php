@@ -7,6 +7,7 @@ use App\Models\AuditLog;
 use App\Models\CitationLog;
 use App\Models\Thesis;
 use App\Models\User;
+use App\Support\DateRange;
 use App\Support\SafeCache;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -63,8 +64,9 @@ class ReportController extends Controller
         return CitationLog::query()
             ->when($filters['roles'], fn ($q, $roles) =>
                 $q->whereHas('user', fn ($q2) => $q2->whereIn('role', $roles)))
-            ->when($filters['date_from'], fn ($q, $d) => $q->whereDate('cited_at', '>=', $d))
-            ->when($filters['date_to'], fn ($q, $d) => $q->whereDate('cited_at', '<=', $d))
+            // Range comparisons, not whereDate() — see App\Support\DateRange.
+            ->when($filters['date_from'], fn ($q, $d) => $q->where('cited_at', '>=', DateRange::start($d)))
+            ->when($filters['date_to'], fn ($q, $d) => $q->where('cited_at', '<', DateRange::endExclusive($d)))
             ->select('thesis_id', DB::raw('COUNT(*) as citation_count'))
             ->groupBy('thesis_id')
             ->orderByDesc('citation_count')
@@ -72,13 +74,44 @@ class ReportController extends Controller
             ->with('thesis:id,title,authors,year_published,category_id');
     }
 
+    /**
+     * The top 10 search terms — the single implementation behind both the live
+     * report and its PDF export, which previously each carried their own copy
+     * of the parsing logic and had already drifted apart.
+     *
+     * Counting happens in PHP rather than SQL because the term lives in a JSON
+     * column and MySQL/SQLite disagree on how to group by it. That means rows
+     * are pulled into memory — so this is deliberately bounded with lazy() and
+     * a running tally instead of ->get(), which would have loaded EVERY search
+     * ever made. On a repository logging thousands of searches a month, the old
+     * ->get() was the same unbounded-memory bug as the audit-log PDF export.
+     */
+    private function mostSearchedTerms(array $filters): \Illuminate\Support\Collection
+    {
+        $counts = [];
+
+        foreach ($this->mostSearchedQuery($filters)->lazyById(1000) as $log) {
+            $term = $log->searchQuery();
+
+            // A row whose term can't be recovered at all is dropped, rather than
+            // counted as a "keyword" made out of its own log sentence — which is
+            // what the old regex fallback (`?? $description`) silently did.
+            if ($term !== null && $term !== '') {
+                $counts[$term] = ($counts[$term] ?? 0) + 1;
+            }
+        }
+
+        return collect($counts)->sortDesc()->take(10);
+    }
+
     private function mostSearchedQuery(array $filters)
     {
         return AuditLog::where('action', 'search')
             ->when($filters['roles'], fn ($q, $roles) =>
                 $q->whereHas('user', fn ($q2) => $q2->whereIn('role', $roles)))
-            ->when($filters['date_from'], fn ($q, $d) => $q->whereDate('created_at', '>=', $d))
-            ->when($filters['date_to'], fn ($q, $d) => $q->whereDate('created_at', '<=', $d));
+            // Range comparisons, not whereDate() — see App\Support\DateRange.
+            ->when($filters['date_from'], fn ($q, $d) => $q->where('created_at', '>=', DateRange::start($d)))
+            ->when($filters['date_to'], fn ($q, $d) => $q->where('created_at', '<', DateRange::endExclusive($d)));
     }
 
     // Distinct users seen active in each hour-of-day (0-23), across the
@@ -95,8 +128,9 @@ class ReportController extends Controller
             ->whereNotNull('user_id')
             ->when($filters['roles'], fn ($q, $roles) =>
                 $q->whereHas('user', fn ($q2) => $q2->whereIn('role', $roles)))
-            ->when($filters['date_from'], fn ($q, $d) => $q->whereDate('created_at', '>=', $d))
-            ->when($filters['date_to'], fn ($q, $d) => $q->whereDate('created_at', '<=', $d))
+            // Range comparisons, not whereDate() — see App\Support\DateRange.
+            ->when($filters['date_from'], fn ($q, $d) => $q->where('created_at', '>=', DateRange::start($d)))
+            ->when($filters['date_to'], fn ($q, $d) => $q->where('created_at', '<', DateRange::endExclusive($d)))
             ->groupBy('hour')
             ->orderBy('hour');
     }
@@ -149,18 +183,11 @@ class ReportController extends Controller
 
         // Grouping by the raw description would split identical keywords
         // searched by different users into separate rows (the description
-        // includes the searcher's name). Extract the keyword first, then
-        // aggregate counts over the actual search term.
+        // includes the searcher's name), so the term is aggregated instead.
+        // That term comes from AuditLog::searchQuery() — the structured
+        // metadata — not from re-parsing the display sentence here.
         $results = SafeCache::remember('reports:most-searched:' . $this->filterSignature($filters), self::TTL, fn () =>
-            $this->mostSearchedQuery($filters)
-                ->pluck('description')
-                ->map(function ($description) {
-                    preg_match('/searched for: (.+)/', $description, $matches);
-                    return $matches[1] ?? $description;
-                })
-                ->countBy()
-                ->sortDesc()
-                ->take(10)
+            $this->mostSearchedTerms($filters)
                 ->map(fn ($count, $keyword) => ['keyword' => $keyword, 'count' => $count])
                 ->values()
                 ->toArray()
@@ -354,15 +381,7 @@ class ReportController extends Controller
 
     private function mostSearchedReportData(array $filters): array
     {
-        $results = $this->mostSearchedQuery($filters)
-            ->pluck('description')
-            ->map(function ($description) {
-                preg_match('/searched for: (.+)/', $description, $matches);
-                return $matches[1] ?? $description;
-            })
-            ->countBy()
-            ->sortDesc()
-            ->take(10);
+        $results = $this->mostSearchedTerms($filters);
 
         return [
             'columns' => ['Keyword', 'Search Count'],

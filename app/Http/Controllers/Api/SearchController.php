@@ -33,12 +33,17 @@ class SearchController extends Controller
 
         // Log the search activity — audit_logs.user_id is nullable specifically
         // to support anonymous/guest searches, which power "Most Searched".
+        //
+        // The term goes into `metadata` as data. `description` is only the
+        // human-readable sentence shown in the log viewer; reports read the
+        // metadata, so rewording the sentence can't break them.
         AuditLog::create([
             'user_id'     => $user?->id,
             'action'      => 'search',
             'target_type' => null,
             'target_id'   => null,
             'description' => ($user?->name ?? 'Guest') . " searched for: {$request->input('q')}",
+            'metadata'    => ['query' => $request->input('q')],
             'ip_address'  => $request->ip(),
         ]);
 

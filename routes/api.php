@@ -4,7 +4,9 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CitationController;
 use App\Http\Controllers\Api\FavoriteController;
+use App\Http\Controllers\Api\LandingController;
 use App\Http\Controllers\Api\SearchController;
+use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\ThesisController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuditLogController;
@@ -13,15 +15,16 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ThesisReportController;
 
 // Rate limiting — a generous ceiling on every route below (mitigates
-// scraping/abuse of public browse/search) plus a much stricter limit
-// specifically on login/register (mitigates password brute-forcing).
-// Both are keyed by IP for anonymous requests, by user ID once authenticated
-// — Laravel's throttle middleware picks whichever is available automatically.
-Route::middleware('throttle:120,1')->group(function () {
+// scraping/abuse of public browse/search) plus a stricter ceiling on the auth
+// endpoints (mitigates credential stuffing). Both are NAMED limiters defined in
+// AppServiceProvider: inline throttles (`throttle:120,1`) key on the IP alone
+// and would share a single counter when nested, so browsing would 429 the login
+// route. Per-account brute-force protection lives in AuthController::login.
+Route::middleware('throttle:api')->group(function () {
 
 // Public routes
 Route::prefix('auth')->group(function () {
-    Route::middleware('throttle:5,1')->group(function () {
+    Route::middleware('throttle:auth')->group(function () {
         Route::post('/register', [AuthController::class, 'register']);
         Route::post('/login',    [AuthController::class, 'login']);
     });
@@ -38,6 +41,14 @@ Route::get('/theses/{thesisId}/citations/generate', [CitationController::class, 
 
 // Public search — logs if logged in
 Route::get('/search', [SearchController::class, 'search']);
+
+// Active academic term — rendered in the navbar, which guests see too, so the
+// read is public. Only a Super Admin can change it (see the super_admin group).
+Route::get('/settings/active-term', [SettingController::class, 'activeTerm']);
+
+// Landing page: hero image + real headline stats + department cards, in one
+// request. Public by definition — this is the page guests land on.
+Route::get('/landing', [LandingController::class, 'index']);
 
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
@@ -61,7 +72,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/audit-logs',         [AuditLogController::class, 'index']);
 
         Route::middleware('permission:export_reports')->group(function () {
-            Route::get('/audit-logs/export', [AuditLogController::class, 'exportPdf']);
+            // CSV, not PDF — the audit log is the one unbounded export here.
+            Route::get('/audit-logs/export', [AuditLogController::class, 'exportCsv']);
             Route::get('/reports/export', [ReportController::class, 'exportPdf']);
         });
         
@@ -87,6 +99,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/permissions',                      [UserController::class, 'permissionsList']);
         Route::post('/users/{id}/grant-permission',     [UserController::class, 'grantPermission']);
         Route::post('/users/{id}/revoke-permission',    [UserController::class, 'revokePermission']);
+
+        // The navbar's "Active Term" — editable in place so it can be rolled
+        // over each semester without a code change.
+        Route::put('/settings/active-term',             [SettingController::class, 'updateActiveTerm']);
+
+        // The landing page's hero image — uploadable so the image can be
+        // swapped without touching the frontend repo.
+        Route::post('/landing/hero',                    [LandingController::class, 'updateHero']);
+        Route::delete('/landing/hero',                  [LandingController::class, 'resetHero']);
+
+        // Which collections are featured on the landing page.
+        Route::put('/landing/collections',              [LandingController::class, 'updateCollections']);
+        Route::delete('/landing/collections',           [LandingController::class, 'resetCollections']);
     });
 
     // Deleting accounts — staff need the delete_accounts permission granted
@@ -162,4 +187,4 @@ Route::middleware('auth:sanctum')->group(function () {
 
 });
 
-}); // end throttle:120,1
+}); // end throttle:api

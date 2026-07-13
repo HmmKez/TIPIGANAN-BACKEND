@@ -11,7 +11,10 @@ use Illuminate\Support\Facades\Storage;
 
 class CategoryController extends Controller
 {
-    private const CACHE_KEY = 'categories:index';
+    // Versioned: the cached payload gained active/restricted counts. Bumping
+    // the key means a deploy serves the new shape immediately instead of
+    // handing the frontend 5 minutes of entries missing the new fields.
+    private const CACHE_KEY = 'categories:index:v2';
 
     // Anyone can view categories including guests — this is queried on
     // nearly every page (browse, dashboard, upload form), so it's worth
@@ -21,12 +24,33 @@ class CategoryController extends Controller
     // from ThesisController on every write).
     public function index()
     {
+        // Three counts, because "how many theses are in this category" has
+        // three different right answers depending on who is asking:
+        //
+        //   theses_count             every row, archived included — what STAFF
+        //                            manage (Collection/Category Management).
+        //   active_theses_count      what a guest may open.
+        //   restricted_theses_count  additionally openable once logged in.
+        //
+        // A reader's visible total is active + (logged in ? restricted : 0),
+        // mirroring ThesisController::index()'s $defaultStatuses exactly. This
+        // used to be a bare withCount('theses'), so public UI counted archived
+        // theses nobody could open: the Browse filter advertised "CAST 19" but
+        // opening it returned 15, and the dashboard's tiles summed to 23 while
+        // its own "Total Items" said 19. Counts are returned rather than
+        // resolved server-side so the response stays identical for guests and
+        // members and can keep sharing one cache entry.
+        //
         // Cache the plain array form, not the Eloquent Collection — a
         // cached object is only as stable as the exact class shape it was
         // serialized from; a later model change (e.g. a new column) can
         // leave an old cached entry unable to unserialize correctly.
         $categories = SafeCache::remember(self::CACHE_KEY, 300, function () {
-            return Category::withCount('theses')->get()->toArray();
+            return Category::withCount([
+                'theses',
+                'theses as active_theses_count' => fn ($q) => $q->where('status', 'active'),
+                'theses as restricted_theses_count' => fn ($q) => $q->where('status', 'restricted'),
+            ])->get()->toArray();
         });
 
         return response()->json($categories);

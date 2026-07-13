@@ -69,7 +69,7 @@ class AuthTest extends TestCase
             ->assertStatus(422);
     }
 
-    public function test_login_is_rate_limited_after_five_attempts(): void
+    public function test_login_is_rate_limited_after_five_failed_attempts(): void
     {
         User::factory()->create([
             'email'    => 'c@example.com',
@@ -77,13 +77,90 @@ class AuthTest extends TestCase
             'role'     => 'student',
         ]);
 
-        // throttle:5,1 — the first five are allowed (wrong password → 422),
-        // the sixth is blocked with 429.
+        // The first five failures must actually be *reached* (422 = credentials
+        // rejected). Asserting only that the sixth is 429 would pass even if the
+        // limiter blocked everything from the first request onward.
         for ($i = 0; $i < 5; $i++) {
-            $this->postJson('/api/auth/login', ['email' => 'c@example.com', 'password' => 'nope']);
+            $this->postJson('/api/auth/login', ['email' => 'c@example.com', 'password' => 'nope'])
+                ->assertStatus(422);
         }
 
         $this->postJson('/api/auth/login', ['email' => 'c@example.com', 'password' => 'nope'])
             ->assertStatus(429);
+    }
+
+    public function test_browsing_the_public_api_does_not_consume_the_login_limit(): void
+    {
+        // Regression: the login throttle used to be an inline `throttle:5,1`
+        // nested inside `throttle:120,1`. Inline throttles key on the client IP
+        // alone — the route is not part of the key — so both shared ONE counter,
+        // and ordinary browsing pushed it past 5 and 429'd the first login.
+        User::factory()->create([
+            'email'    => 'd@example.com',
+            'password' => Hash::make('Password123'),
+            'role'     => 'student',
+        ]);
+
+        for ($i = 0; $i < 30; $i++) {
+            $this->getJson('/api/theses')->assertOk();
+        }
+
+        $this->postJson('/api/auth/login', ['email' => 'd@example.com', 'password' => 'Password123'])
+            ->assertOk()
+            ->assertJsonStructure(['token']);
+    }
+
+    public function test_a_successful_login_clears_the_failed_attempt_counter(): void
+    {
+        User::factory()->create([
+            'email'    => 'e@example.com',
+            'password' => Hash::make('Password123'),
+            'role'     => 'student',
+        ]);
+
+        // Three typos, a success, then three more typos. Only failures are
+        // counted and success resets them, so the total never reaches the limit
+        // and the user is never locked out of an account they can log into.
+        for ($i = 0; $i < 3; $i++) {
+            $this->postJson('/api/auth/login', ['email' => 'e@example.com', 'password' => 'nope'])
+                ->assertStatus(422);
+        }
+
+        $this->postJson('/api/auth/login', ['email' => 'e@example.com', 'password' => 'Password123'])
+            ->assertOk();
+
+        for ($i = 0; $i < 3; $i++) {
+            $this->postJson('/api/auth/login', ['email' => 'e@example.com', 'password' => 'nope'])
+                ->assertStatus(422);
+        }
+
+        $this->postJson('/api/auth/login', ['email' => 'e@example.com', 'password' => 'Password123'])
+            ->assertOk();
+    }
+
+    public function test_locking_one_account_does_not_lock_another(): void
+    {
+        User::factory()->create([
+            'email'    => 'victim@example.com',
+            'password' => Hash::make('Password123'),
+            'role'     => 'student',
+        ]);
+        User::factory()->create([
+            'email'    => 'bystander@example.com',
+            'password' => Hash::make('Password123'),
+            'role'     => 'student',
+        ]);
+
+        for ($i = 0; $i < 6; $i++) {
+            $this->postJson('/api/auth/login', ['email' => 'victim@example.com', 'password' => 'nope']);
+        }
+
+        $this->postJson('/api/auth/login', ['email' => 'victim@example.com', 'password' => 'Password123'])
+            ->assertStatus(429);
+
+        // Same IP, different account — must be unaffected, otherwise one bad
+        // actor on a shared campus network could lock out the whole school.
+        $this->postJson('/api/auth/login', ['email' => 'bystander@example.com', 'password' => 'Password123'])
+            ->assertOk();
     }
 }

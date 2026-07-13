@@ -2,6 +2,9 @@
 
 namespace App\Providers;
 
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
@@ -38,5 +41,21 @@ class AppServiceProvider extends ServiceProvider
         // check (Have I Been Pwned lookup) — that's a live external HTTP call
         // on every password set, not worth the dependency/failure mode here.
         Password::defaults(fn () => Password::min(8)->mixedCase()->numbers());
+
+        // Named limiters, not inline `throttle:120,1` / `throttle:5,1`. An inline
+        // throttle keys purely on the client IP (see ThrottleRequests::resolve-
+        // RequestSignature) — the route is NOT part of the key — so a strict
+        // inline throttle nested inside a lenient one shares ONE counter with it.
+        // Ordinary browsing would push that shared counter past the login limit
+        // and 429 the first login attempt. Naming them gives each its own bucket.
+        RateLimiter::for('api', fn (Request $request) => Limit::perMinute(120)
+            ->by($request->user()?->id ?: $request->ip()));
+
+        // Ceiling on the auth endpoints per IP. Deliberately generous: it exists
+        // to blunt credential-stuffing across many accounts, not to police one
+        // user's typos. Per-account brute-force protection is enforced separately
+        // in AuthController::login, which counts only FAILED attempts.
+        RateLimiter::for('auth', fn (Request $request) => Limit::perMinute(20)
+            ->by($request->ip()));
     }
 }

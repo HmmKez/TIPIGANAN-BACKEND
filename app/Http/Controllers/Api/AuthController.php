@@ -7,11 +7,30 @@ use App\Models\AuditLog;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    /**
+     * How many failed logins an account tolerates per minute before it locks.
+     */
+    private const MAX_LOGIN_ATTEMPTS = 5;
+
+    /**
+     * Brute-force key for one account as seen from one IP. Scoping to the email
+     * as well as the IP means a shared campus IP can't lock everyone out, and a
+     * distributed attack on one account is still counted together.
+     */
+    private function loginThrottleKey(Request $request): string
+    {
+        return 'login:'.Str::transliterate(
+            Str::lower((string) $request->input('email')).'|'.$request->ip()
+        );
+    }
+
     public function register(Request $request)
     {
         $request->validate([
@@ -57,13 +76,30 @@ class AuthController extends Controller
             'password' => 'required|string',
         ]);
 
+        // Only FAILED attempts are counted (and the counter is cleared on success
+        // below), so a legitimate user is never locked out by simply signing in
+        // often — only by repeatedly getting the password wrong.
+        $throttleKey = $this->loginThrottleKey($request);
+
+        if (RateLimiter::tooManyAttempts($throttleKey, self::MAX_LOGIN_ATTEMPTS)) {
+            $seconds = RateLimiter::availableIn($throttleKey);
+
+            throw ValidationException::withMessages([
+                'email' => ["Too many failed login attempts. Please try again in {$seconds} seconds."],
+            ])->status(429);
+        }
+
         $user = User::where('email', $request->email)->first();
 
         if (! $user || ! Hash::check($request->password, $user->password)) {
+            RateLimiter::hit($throttleKey, 60);
+
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
+
+        RateLimiter::clear($throttleKey);
 
         if ($user->status === 'deactivated') {
             return response()->json([

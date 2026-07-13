@@ -79,6 +79,15 @@ class ThesisController extends Controller
                     $sub->where('title', 'LIKE', "%{$request->q}%")
                         ->orWhere('authors', 'LIKE', "%{$request->q}%");
                 }))
+            // Recently-added window. The dashboard's "New in 30 days" tile wants
+            // a count, not a list, so it asks with per_page=1 and reads the
+            // paginator's `total` — which means the number automatically obeys
+            // the visibility rules above instead of being computed separately
+            // and drifting out of sync with them. Clamped so a hand-crafted
+            // ?added_within_days=999999 can't turn into a full-table scan.
+            ->when(is_numeric($request->added_within_days), fn($q) =>
+                $q->where('created_at', '>=',
+                    now()->subDays(max(1, min((int) $request->added_within_days, 365)))))
             ->latest()
             ->paginate(12);
 

@@ -277,17 +277,19 @@ class UserController extends Controller
                                 ->get(),
             // This user's own recent searches — safe for any role to see
             // about themselves, unlike the full audit log (staff/super_admin
-            // only). description is "{name} searched for: {query}"; extract
-            // just the query for display.
+            // only). Reads the structured term via AuditLog::searchQuery()
+            // rather than re-parsing the display sentence here.
             'recent_searches' => AuditLog::where('user_id', $request->user()->id)
                                 ->where('action', 'search')
                                 ->latest('created_at')
                                 ->limit(5)
-                                ->get(['description', 'created_at'])
-                                ->map(fn ($log) => [
-                                    'query'      => preg_replace('/^.*searched for: /', '', $log->description),
+                                ->get(['description', 'metadata', 'created_at'])
+                                ->map(fn (AuditLog $log) => [
+                                    'query'      => $log->searchQuery(),
                                     'created_at' => $log->created_at,
-                                ]),
+                                ])
+                                ->filter(fn ($s) => $s['query'] !== null)
+                                ->values(),
         ]);
     }
 
