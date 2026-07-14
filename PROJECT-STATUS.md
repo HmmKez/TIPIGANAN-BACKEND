@@ -654,6 +654,22 @@ Two pairs of distinct collections shared one identifier, one icon and one colour
 
 **Tests 65 → 71** (`CategoryCodeTest`): code required; **two categories cannot share a code** (the CABM-B/CABM-H case, asserted directly); stored uppercase; junk characters rejected; editing a category keeps its own code available; search results carry their category.
 
+### Category cover images restored (`categories:restore-covers`)
+User: most categories have their own official MDC seal, and CAST's had been replaced with a test image.
+
+Only CAST had a `cover_image_path` at all (and it was the wrong image); the other ten were null and the landing page was papering over it with a hardcoded `FALLBACK_COVERS` map in the frontend.
+
+- The six department seals now live in the **backend** (`database/seeders/assets/category-covers/`) — it cannot read the frontend repo, so it has to own its own seed assets.
+- New `php artisan categories:restore-covers` (`--dry-run`) copies them onto the `public` disk under stable filenames (`default-cast.jpg`), sets `cover_image_path`, and **deletes the file it replaced** so nothing is orphaned. Re-running overwrites the same files rather than piling up new randomly-named copies. **They stay editable** — uploading a cover in Category Management replaces them exactly as before.
+- Keyed on the category **code**, not the name — the names have already been rewritten once and will be again. This is what the code is for.
+- **Mapped by looking at each image, not by trusting its filename.** That caught two traps: `education.jpg` is the College of **Education** seal (so it belongs to COE, not Graduate Studies), and `business.jpg`/`hospitality.jpg` are the same college's seal in gold and green — trivially easy to swap.
+
+**Bug this removed.** The frontend's `FALLBACK_COVERS` map paired **"Graduate Studies" → education.jpg**, i.e. GS was displaying the College of Education's logo. The map was also keyed on the old short names (`'CAST'`), which stopped matching the moment the categories were renamed to their full titles — so it was already dead code as well as wrong. Deleted; a category with no cover now gets the neutral brand panel.
+
+**Deliberately left without a cover:** GS, SC, FR, IP, SBC. No dedicated artwork exists for them, and the only other images available (`department-studies.png`, `faculty.png`) are just the generic MDC seal — putting a generic seal on some collections and not others reads as a bug, not a decision. They show the brand panel until someone uploads real artwork.
+
+**Verified** by rendering the landing page and reading back which image each card actually resolved to: all six seals on the correct college, five brand panels, no orphaned files left in storage.
+
 ---
 
 ## 4. Known Issues / Explicitly Not Done
