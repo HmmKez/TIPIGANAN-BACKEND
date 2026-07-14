@@ -758,6 +758,19 @@ There were **two** watermark layers, and the crowding came from the second:
 
 **Verified** on a rendered page at full size: 0 logos in the overlay, 6 identity stamps, and every line of body text still legible under the enlarged seal.
 
+### Staff dashboard chart: "Department" wording, and bars that floated off the baseline
+User: rename the "Collections by Department" card (the categories are no longer only departments — same reason the landing grid was renamed), and fix that a collection with a long name has its bar sitting higher than the others.
+
+**The wording.** Both the staff dashboard and the Reports page still said *"Collections by Department"* — which by now was doubly wrong, because a **"collection" IS a category**, so the phrase read as though it grouped collections by some other thing. Both charts count **items**, so they now say **"Items by Collection"** (and "Items by Year"). The report picker, the printed report's heading (*"Thesis Count by Collection"*), and the student dashboard's *"Browse by Collection"* card all follow. **The route segment `by-department` is unchanged** — renaming it would break the frontend's report picker and any saved link, for no gain.
+
+**The bar bug was real, and it corrupted the chart's meaning.** `.bar-col` was a flex column holding the bar and its label **as siblings**, so each bar's bottom edge rested on top of whatever its own label happened to be. A category whose name wrapped to two lines had a taller label, which **pushed its bar a line-height higher than its neighbours**. The bars therefore did not share a baseline — and a bar's apparent height no longer meant only its value, which is the one thing a bar chart has to guarantee.
+
+The column is now a **grid whose label row is a fixed 18px**, so every plotting area is identical and the bars land on one baseline regardless of what they are called. As a bonus the bar's percentage height now resolves against the plot row rather than the whole column, so the tallest bar fills the plot exactly instead of overrunning into the label.
+
+**The axis now shows the category `code`, with the full name on hover** — no bar is wide enough for "College of Business and Management - Hospitality", and that name is precisely what used to wrap and lift its own bar. This required `ReportController::byDepartment()` to eager-load `code` (it loaded only `{id, name}`), and **the SafeCache key was bumped to `reports:by-department:v2`** because the payload's *shape* changed: a key still holding the old rows would keep serving them for the rest of the TTL and every bar would render with a blank label — a bug that looks like the frontend's fault and only appears wherever the cache happens to be warm.
+
+**Verified** on the live staff dashboard: 5 bars, **1 distinct baseline** (previously one per label height), uniform 18px labels, codes on the axis with full names in the tooltip. Report tests pass.
+
 ---
 
 ## 4. Known Issues / Explicitly Not Done
