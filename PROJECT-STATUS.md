@@ -30,19 +30,21 @@
 - **Frontend**: `C:\Users\conch\Codes\CAPSTONE\tipiganan-frontend` (React + Vite, Axios)
 - **Team guide / blueprint source docs**: `C:\Users\conch\Desktop\CAPSTONE\*.pdf`
 - **Team**: Group 7 — Concha, Esto, Mendez, Miano
-- **Both repos are on `dev`, and everything is committed and pushed to `origin/dev`** (verified clean as of 2026-07-13 — 0 uncommitted files on both, local `HEAD` == `origin/dev`). Backend `d06b362 → ba04202`; frontend `f327598 → 4cddb0e`.
+- **Both repos are on `dev`, and everything is committed and pushed to `origin/dev`** (verified clean as of 2026-07-13 — 0 uncommitted files on both, local `HEAD` == `origin/dev`). This session took the backend `d06b362 → b717dc6` and the frontend `f327598 → 85f047f`.
 
 ### Teammates pulling this — what they actually need
 
-They must be on the **`dev`** branch (not `main`). `git pull`, then:
+They must be on the **`dev`** branch (not `main`). `git pull`, then, **in this order**:
 
 | | Backend | Frontend |
 |---|---|---|
-| Dependencies | `composer install` + `npm install` — the backend has its **own** `package.json` for the Node OCR pipeline, which trips people up. **No new deps were added this session**, so this is a no-op unless they're behind. | `npm install` (no new deps either) |
-| Database | **`php artisan migrate`** — see below. This is the step people skip. | — |
-| Config | **`php artisan config:clear`** — there is a new config file (`config/audit.php`) and it will not be picked up from a cached config. | — |
+| 1. Dependencies | `composer install` + `npm install` — the backend has its **own** `package.json` for the Node OCR pipeline, which trips people up. **No new deps were added this session**, so this is a no-op unless they're behind. | `npm install` (no new deps either) |
+| 2. Config | **`php artisan config:clear`** — there is a new config file (`config/audit.php`), and it will not be seen through a cached config. | — |
+| 3. Database | **`php artisan migrate`** — four new migrations, see below. This is the step people skip. | — |
+| 4. Storage | **`php artisan storage:link`** (once, if they never have) — category cover images are served from `storage/app/public`. | — |
+| 5. Category covers | **`php artisan categories:restore-covers`** — **easy to miss.** Each teammate has their own local database, so the department seals exist only where that command has been run. Without it their categories show blank brand panels and it looks like a bug. | — |
 
-**Migrations in this push (3):**
+**Migrations in this push (4):**
 - `create_settings_table` — the Super-Admin-editable Active Term, landing hero image, and featured collections all live here.
 - `add_metadata_to_audit_logs_table` — structured search terms. **Also backfills existing rows**, so it is safe (and necessary) to run against a populated database.
 - `add_indexes_to_audit_logs_table` — `(created_at)`, `(action, created_at)`, `(user_id, created_at)`. On a large `audit_logs` this one takes a moment.
@@ -718,16 +720,34 @@ All six cards are now written from the reader's side of the screen. Verified the
 
 **Test accounts** (all password: `password`): `superadmin@tipiganan.com`, `staff@tipiganan.com`, `student@tipiganan.com`, `teacher@tipiganan.com`
 
-**Useful commands**:
+**Every custom artisan command** (all seven — the scheduled ones fire on their own only once the deploy cron exists, see §7):
 ```bash
-php artisan scout:sync-index-settings          # push Meilisearch filterable-attribute config
-php artisan scout:flush "App\Models\Thesis"    # wipe the search index (use before a re-import if it's stale)
-php artisan scout:import "App\Models\Thesis"   # backfill/re-sync all theses into the search index
-php artisan guide:generate                     # regenerate the team guide PDF
-php artisan docs:features                      # regenerate the capstone "System Functionalities & Technology Reference" PDF
-php artisan theses:purge-expired-files         # permanently delete superseded thesis PDFs past their grace period
-php artisan test                                # full backend test suite (4 tests, all passing)
-cd /c/Users/conch/meilisearch && ./meilisearch.exe --http-addr 127.0.0.1:7700 --no-analytics   # start Meilisearch manually if it's down
+php artisan test                              # full backend test suite — 71 tests, all passing
+
+# Search index
+php artisan scout:sync-index-settings         # push Meilisearch filterable-attribute config
+php artisan scout:flush "App\Models\Thesis"   # wipe the search index (before a re-import if it's stale)
+php artisan scout:import "App\Models\Thesis"  # backfill/re-sync all theses into the index
+
+# Documents
+php artisan docs:features                     # regenerate the capstone "System Functionalities" PDF
+php artisan guide:generate                    # regenerate the team guide PDF
+
+# Data / assets
+php artisan categories:restore-covers         # restore each department's official MDC seal as its category
+                                              #   cover. Run once per machine — covers live in the DB, so a
+                                              #   teammate's install has none until they run it. --dry-run works.
+
+# Maintenance (all scheduled in routes/console.php)
+php artisan backup:database                   # mysqldump, timestamped + rotated (daily 02:00)
+php artisan theses:verify-checksums           # fixity: re-hash stored PDFs vs recorded SHA-256 (weekly)
+php artisan theses:purge-expired-files        # delete superseded thesis PDFs past their grace period (daily)
+php artisan audit:prune                       # archive old usage-analytics audit rows to CSV, verify the
+                                              #   archive, THEN delete. Security entries are never pruned.
+                                              #   (monthly, 1st @ 03:00). --dry-run / --days / --force.
+
+# Meilisearch (optional service — the app falls back to MySQL if it's down)
+cd /c/Users/conch/meilisearch && ./meilisearch.exe --http-addr 127.0.0.1:7700 --no-analytics
 ```
 
 **Auto-memory files** (persist across Claude Code sessions, separate from this file):
