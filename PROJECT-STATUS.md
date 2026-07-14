@@ -741,6 +741,21 @@ Also fixed: the viewer's status bar is a fixed 24px strip, and its two labels we
 
 **Noted, not changed:** on a wide desktop the viewer lays pages out **two-abreast** rather than in a single column — `pageWrap` is `display: inline-block` inside react-pdf's own wrapper div, so the flex column never applies to the pages themselves. Confirmed against the committed code that this is **pre-existing**, not a regression from the above. Left alone because the user did not raise it and a 2-up spread reads acceptably; worth revisiting if a single-column flow is wanted.
 
+### Watermark: seven logos on a page, down to one
+User: remove the mini logos in the viewer, make the central seal bigger so it fills the dead space "but don't make it to the point where text is barely visible," and keep the identity/date stamps but smaller.
+
+There were **two** watermark layers, and the crowding came from the second:
+1. **Backend** (`WatermarkService`) stamps **one** MDC seal into the served PDF, centred, at `min(w,h) × 0.5`, alpha `0.15`. Generated per request with `Cache-Control: no-store`, so a change takes effect immediately — nothing to purge.
+2. **Frontend** (`Watermark.jsx`) overlaid a 3×2 grid whose every cell drew **another 96px seal** plus the identity text. That is six more logos on top of the server's one, on a page whose brand was never in doubt.
+
+**The overlay no longer draws a logo at all.** It carries only what the server *cannot* know at stamp time — who is reading it, right now. It still repeats across six cells, deliberately: cropping a screenshot to a single paragraph must not be enough to cut the identity off it. The stamps drop to `8px` / `rgba(255,0,0,0.16)`, small enough to read straight through.
+
+**The server's seal grows `0.5 → 0.78`** of the page's short side, into the margins it was leaving empty. **Its alpha drops `0.15 → 0.10` in the same change, and had to**: at 0.78 the seal covers well over half the page rather than a quarter, so holding the old alpha would have put half again as much ink across the body text — precisely the "text barely visible" outcome the user warned against. Lighter ink over a larger area is what keeps it a watermark rather than a veil. **Size and alpha are coupled; do not change one without the other.**
+
+`WATERMARK_LOGO` / `public/images/mdc-seal.png` is no longer imported anywhere on the frontend — the export was removed rather than left dangling. **The image file stays on disk**: it is the original MDC seal, and the backend's stamp (`resources/images/mdc-logo.png`) must keep matching it.
+
+**Verified** on a rendered page at full size: 0 logos in the overlay, 6 identity stamps, and every line of body text still legible under the enlarged seal.
+
 ---
 
 ## 4. Known Issues / Explicitly Not Done
