@@ -692,6 +692,34 @@ Also fixed: "Analytics — most-viewed items" (no such report exists; the six ar
 
 All six cards are now written from the reader's side of the screen. Verified the rendered rows are `[3,3]` and that **every icon actually resolves** (two are Font Awesome 6-only names — on an FA5 sheet they would have silently rendered blank; the app loads FA 6.4).
 
+### First deployment — frontend on Vercel, backend through a Cloudflare tunnel
+User wanted to put the system online on Vercel's free tier to test it.
+
+**The backend cannot go on Vercel, and this is not a configuration problem.** Vercel is serverless with a read-only, ephemeral filesystem, and this app is built on the local disk: theses are stored via `store('theses','local')` and their SHA-256 integrity checksums are computed with `hash_file()` against the real path; cover images, category covers and the landing hero use the `public` disk plus the `storage:link` **symlink**; the PDF watermark stamping (FPDI) reads the file off disk; `audit:prune` streams CSV archives to `Storage::disk('local')`. On Vercel every request is a fresh container — **an uploaded thesis would simply cease to exist**. On top of that there is no PHP runtime (only an unofficial community one), no MySQL, no scheduler for the monthly `audit:prune`, and a 10-second function limit that an upload + OCR + stamping run would exceed.
+
+**So the deployment is split**, which the app was already well suited to: auth is a **bearer token in `localStorage`**, not a Sanctum cookie, so there is no cross-site cookie/`SameSite` problem between two different domains.
+
+- **Frontend → Vercel** (free). Added `vercel.json` rewriting unmatched paths to `index.html`: the app uses `BrowserRouter`, so `/browse` is resolved in the browser and does not exist as a file — a direct hit, a refresh, or a shared link would 404 without it. Vercel checks the filesystem first, so real assets still serve.
+- **Backend → this machine, exposed by `cloudflared`** (`winget install Cloudflare.cloudflared`; `cloudflared tunnel --url http://127.0.0.1:8000`). Free and needs no domain. **Caveat: a quick tunnel's `*.trycloudflare.com` hostname is random and changes on every restart**, and `VITE_API_BASE_URL` is baked into the bundle at build time — so a new tunnel means updating that variable in Vercel and redeploying. A named tunnel on a real domain (~$1–3/yr) gives a permanent `api.<domain>` and is the fix worth making before the defense.
+- **Vercel builds the repo's default branch (`main`)**, not `dev` where all the work is. Set Production Branch → `dev` (Settings → Git, or Environments → Production → Branch Tracking). Note that **"Redeploy" reuses the same commit** and will not pick up the new branch — a fresh push is required.
+- Backend `.env` gained `FRONTEND_URL=https://<app>.vercel.app`; `config/cors.php` locks `allowed_origins` to it. Verified through the live tunnel that the Vercel origin gets `Access-Control-Allow-Origin` and an unknown origin gets none.
+
+### Mobile: the whole app was laying out wider than the screen
+User: on a phone the landing navbar's "Get Started" is off-screen and has to be scrolled to, "and the content gets cut off."
+
+Not two bugs but **one, in two places** — and the second half was not reported, only found by checking. Both the landing navbar and the app shell are flex containers, and **a flex item defaults to `min-width: auto`: it refuses to shrink below its own content.**
+
+- **Landing** — the logo + wordmark beside the Sign In / Get Started pills gave `.lp-navbar` a hard **456px** floor.
+- **App shell** — `.main-wrap` is `flex: 1`, and the topbar's buttons plus a category `<select>` (a `<select>` is intrinsically as wide as its longest `<option>`, here *"College of Arts, Sciences, and Technology"*) gave it a **444px** floor. So `/browse` was broken too.
+
+Because the floor is on a top-level column, **every section below it laid out at that width inside a 375px viewport** — which is precisely why the page could be scrolled sideways *and* its content looked cut off. Those were the same bug, not two.
+
+Fixed at the source: `min-width: 0` on the sides that should yield, `flex-shrink: 0` on the actions that must stay whole, `max-width: 100%` on the `<select>`, and the wordmark truncates as a last resort — so the bar fits at **any** width rather than at the widths that happened to be tested.
+
+Then sized for phones rather than merely made to fit: the stat strip is a **2×2** (its `auto-fit`/`minmax(180px)` grid could only ever resolve to a single column on a phone — the four figures became a four-storey tower), the hero's buttons stack full-width instead of wrapping to ragged halves, and Sign In sheds its pill chrome to buy Get Started the room it needs.
+
+**Verified with Playwright, not by eye:** `scrollWidth == viewport` at 320/360/375/414/768px on `/`, `/browse`, `/login`, `/register` (before: +136/+96/+81/+42 on `/` and +84/+69 on `/browse`), desktop unchanged at 1280/1440/1920, and the production build passes.
+
 ---
 
 ## 4. Known Issues / Explicitly Not Done
