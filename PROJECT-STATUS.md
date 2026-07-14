@@ -720,6 +720,27 @@ Then sized for phones rather than merely made to fit: the stat strip is a **2×2
 
 **Verified with Playwright, not by eye:** `scrollWidth == viewport` at 320/360/375/414/768px on `/`, `/browse`, `/login`, `/register` (before: +136/+96/+81/+42 on `/` and +84/+69 on `/browse`), desktop unchanged at 1280/1440/1920, and the production build passes.
 
+### Mobile: no way off the auth pages
+"Back to Home" existed **only** inside `.auth-left`, the blue branding panel — which is `display: none` below 900px. On a phone the link was not merely hard to reach, it **was not rendered at all**, stranding anyone who opened Login or Register directly (the browser's back button only helps someone who arrived from the landing page). Added `.auth-back-mobile` inside the card, shown exactly when the panel carrying the other one is hidden, so there is always precisely one. Verified at 375px and 1440px on both pages: one visible `a[href="/"]`, no duplicate on desktop, and it navigates.
+
+### Mobile: thesis covers rendered at wildly different sizes
+`.detail-cover` establishes a `width:100%` / `aspect-ratio:3/4` frame — but **nothing ever styled the `<img>` inside it**, so every cover rendered at its own intrinsic pixel size. A small thumbnail sat lost in the middle of the frame while a full-resolution scan burst out of it. `object-fit: cover` + `object-position: center top` (a cover page's title is at the top) makes the frame decide the size. Verified: a 1197×855 source now lays out at exactly the frame's 297×396.
+
+### The PDF viewer's left edge did not exist
+User: "a part of the left side gets cut and I cannot scroll over to the left side."
+
+The scroll container centred its pages with `align-items: center`. **When a flex container centres a child wider than itself, the overflow is split across both sides — and `scrollLeft` cannot go below 0**, so the left half sat at a negative scroll offset that was permanently unreachable. Scrolling was not disabled; the left edge simply did not exist. This is a classic centred-overflow trap and it would have hit any zoomed page, on desktop too.
+
+Centring moved off the scroll container and onto an inner track sized `width: fit-content; min-width: 100%` — one rule covering both cases: narrower than the viewport, it stretches to 100% and centres the pages inside it; wider, it grows to the page's own width so the pages sit flush at its left edge and every part is reachable by scrolling right from 0.
+
+Separately, **a PDF page at 100% zoom is ~612 CSS px and cannot fit a 375px phone**, so the viewer opened every document already overflowing. It now fits-to-width on load (60% on a phone), computed from page 1's real `originalWidth`; it **only ever shrinks**, so desktop still opens at 100%.
+
+**Verified at 375px:** zoomed to 894px, the scroller reports `scrollWidth 894 > clientWidth 375`, and at `scrollLeft = 0` the page's left edge is at `x = 0`. Desktop re-checked at 1440px: still 100%, unchanged.
+
+Also fixed: the viewer's status bar is a fixed 24px strip, and its two labels were wrapping inside a box too short to hold them and printing over each other on a phone. Both are pinned to one line; the second (which the first already implies — "view only") drops below 640px.
+
+**Noted, not changed:** on a wide desktop the viewer lays pages out **two-abreast** rather than in a single column — `pageWrap` is `display: inline-block` inside react-pdf's own wrapper div, so the flex column never applies to the pages themselves. Confirmed against the committed code that this is **pre-existing**, not a regression from the above. Left alone because the user did not raise it and a 2-up spread reads acceptably; worth revisiting if a single-column flow is wanted.
+
 ---
 
 ## 4. Known Issues / Explicitly Not Done
