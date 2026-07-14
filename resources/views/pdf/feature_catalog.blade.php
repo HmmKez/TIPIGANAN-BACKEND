@@ -320,7 +320,7 @@
   <tr><th style="width:26%">Service</th><th>Purpose in TIPIGANAN</th><th style="width:14%">Status</th></tr>
   <tr>
     <td class="k">Meilisearch</td>
-    <td>The dedicated search engine. Provides fast, <b>typo-tolerant</b>, relevance-ranked full-text search across collection metadata and extracted document text.
+    <td>The dedicated search engine. Provides fast, <b>typo-tolerant</b>, relevance-ranked search across a collection's title, authors, adviser, abstract and keywords — including the abstract and keywords recovered by OCR from a scanned document.
         <br><b>If unavailable:</b> the system automatically falls back to a direct database search. Search still works — it simply loses typo-tolerance and relevance ranking.</td>
     <td><span class="opt">OPTIONAL</span></td>
   </tr>

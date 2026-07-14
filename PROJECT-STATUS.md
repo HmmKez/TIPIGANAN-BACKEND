@@ -670,6 +670,18 @@ Only CAST had a `cover_image_path` at all (and it was the wrong image); the othe
 
 **Verified** by rendering the landing page and reading back which image each card actually resolved to: all six seals on the correct college, five brand panels, no orphaned files left in storage.
 
+### Landing feature cards — uniform grid, and two claims that weren't true
+User: the six feature cards land 4-on-top / 2-on-the-bottom, make them uniform — "and make sure the information put there is accurate to the system."
+
+**Layout.** `.lp-features-grid` used `repeat(auto-fit, minmax(260px, 1fr))`, which packs as many 260px columns as the viewport allows — five on a wide screen — leaving a ragged final row. Now a **fixed 3-column grid** (3 + 3), stepping to 2 and then 1 at breakpoints; six divides evenly into all three. Verified by measuring the rendered row structure at three widths: `[3,3]` at 1440px, `[2,2,2]` at 900px, `[1×6]` at 560px.
+
+**The accuracy pass found two false claims — both also present in the capstone PDF and in the app itself.**
+
+1. **"Multi-field search across … full-text OCR content"** — there is no full-text search. `Thesis::toSearchableArray()` indexes title, authors, adviser, abstract, keywords, year, category; OCR writes back **only the abstract and keywords**. No column stores the extracted body text. Corrected on the card, in §6.4 above, and in the feature catalog's Meilisearch entry (which claimed "extracted document text").
+2. **"Downloads, printing, and screenshots disabled"** — **a browser cannot disable a screenshot.** The viewer blocks Ctrl+P/S/C, right-click, F12 and the print dialog, and overwrites the clipboard on PrintScreen — but nothing stops Win+Shift+S, the Snipping Tool, or a phone camera. A reader disproves it in one keystroke, and then disbelieves every true claim beside it. Replaced everywhere (landing card, Browse banner, Thesis Detail banner, and the PrintScreen clipboard message) with what is both **true and a stronger deterrent**: downloading/printing/copying are blocked, and *every page is watermarked with the reader's identity, so any screenshot is traceable to their account*.
+
+Also fixed: "Analytics — most-viewed items" (no such report exists; the six are dashboard, most-cited, most-searched, by-department, by-year, users-online), and the "MDC-Wide Coverage" card, which listed stale department acronyms and was redundant with the "Explore the Collections" grid immediately below it — replaced with an honest **OCR** card, which was a real feature the page never mentioned.
+
 ---
 
 ## 4. Known Issues / Explicitly Not Done
@@ -753,7 +765,7 @@ Organized by capability area, describing **the system as it stands today** — n
 - For scanned PDFs, runs OCR against rasterized page images to recover machine-readable text; for very long scanned theses (60-150+ pages), only the first 12 and last 8 pages are processed (where title/abstract/keywords/introduction and conclusion live), keeping upload time reasonable rather than OCR-ing the entire document inline.
 - From either kind of PDF, automatically locates and extracts the Abstract and Keywords sections specifically (heading-aware, not a raw text dump).
 - Extracted keywords are cleaned before saving — a failed heading match producing a paragraph of body text is discarded rather than saved as garbage; genuine keyword lists are capped in count and per-term length.
-- Full extracted text also feeds the search index, so even a scanned thesis with no typed metadata is still full-text searchable.
+- **Correction (was wrong here for a while):** the full extracted text is *not* stored or indexed. `Thesis::toSearchableArray()` indexes title, authors, adviser, abstract, keywords, year and category — nothing else — and OCR writes back only the **abstract and keywords**. So a scanned thesis becomes searchable *through those recovered fields*, not through its full body text. The landing page claimed "full-text OCR content" search on that basis; corrected.
 - **Human-reviewed metadata refresh** — replacing a file no longer leaves the *previous* file's abstract/keywords silently in place. The new file is re-read and the edit page surfaces what was detected vs. what's on record (flagging, e.g., an abstract the new file no longer contains), with per-field **Use detected** / **Clear** actions. Nothing is ever auto-overwritten; a genuinely blank field still auto-fills. A **"Re-extract from current file"** button re-runs detection on demand at any time.
 
 ### 6.5 Search & Browse
