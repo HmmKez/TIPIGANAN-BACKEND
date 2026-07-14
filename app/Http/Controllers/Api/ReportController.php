@@ -146,14 +146,24 @@ class ReportController extends Controller
         return response()->json($results);
     }
 
-    // Theses count by department/category — not a user-activity report, no role/date filter
+    // Theses count per collection (category) — not a user-activity report, so no
+    // role/date filter.
     public function byDepartment()
     {
-        $results = SafeCache::remember('reports:by-department', self::TTL, fn () =>
+        // `code` is loaded so the chart can label its axis "CABM-B" rather than
+        // "College of Business and Management - Business", which no bar is wide
+        // enough to hold.
+        //
+        // The cache key is versioned because this payload's SHAPE changed. A key
+        // still holding the old {id, name} rows would keep serving them for the
+        // rest of the TTL, and every bar would render with a blank label — the
+        // kind of bug that looks like the frontend's fault and only appears in
+        // whichever environment happens to have a warm cache.
+        $results = SafeCache::remember('reports:by-department:v2', self::TTL, fn () =>
             Thesis::select('category_id', DB::raw('COUNT(*) as total'))
                 ->where('status', 'active')
                 ->groupBy('category_id')
-                ->with('category:id,name')
+                ->with('category:id,code,name')
                 ->get()
                 ->toArray()
         );
@@ -271,7 +281,11 @@ class ReportController extends Controller
         return match ($reportType) {
             'dashboard' => 'Dashboard Summary',
             'most-cited' => 'Most Cited Theses',
-            'by-department' => 'Thesis Count by Department',
+            // The route segment stays 'by-department' (changing it would break
+            // every saved link and the frontend's report picker); only the
+            // printed heading is corrected. The categories have not been only
+            // departments for some time.
+            'by-department' => 'Thesis Count by Collection',
             'by-year' => 'Thesis Count by Year',
             'most-searched' => 'Most Searched Keywords',
             'users-online' => 'Users Online',
