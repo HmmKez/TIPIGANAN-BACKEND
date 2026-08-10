@@ -1217,3 +1217,27 @@ php artisan theses:normalize-pdfs --dry-run --with-trashed                  # an
 php artisan theses:verify-checksums                                         # file integrity
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/api/categories
 ```
+
+### 8.9 What of this actually gets deployed to production
+
+A common misread is that the local setup and the production setup are the same list. They overlap, but several items here are **Windows-local conveniences that never ship**, and two are **easy-to-forget requirements that break the system quietly if missed**.
+
+| Thing | Ships to production? | Notes |
+|---|---|---|
+| **PHP 8.3** | **Yes** | With **PHP-FPM + OPcache**, unlike here — that's the change that removes the ~500ms per-request tax (Known Issue #1). |
+| **MySQL** | **Yes** | A managed service or a normal `systemd` unit. Auto-starts properly, so none of the Laragon manual-start problem exists. |
+| **Composer** | **Yes** (or build step) | `composer install --no-dev --optimize-autoloader`. |
+| **Node.js** | **Yes — and it's the one people forget** | The OCR pipeline literally runs `shell_exec("node ocr/extract.cjs …")`. A PHP-only host **cannot do OCR at all**. |
+| Backend `npm install` | **Yes** | `pdf-parse`, `pdf-to-img`, `tesseract.js`. Tesseract also downloads `*.traineddata` on first use, so the app needs a **writable temp dir** and outbound internet on that first run. |
+| **qpdf** | **Yes — the other forgotten one** | Without it, PDFs from Word/scanners upload fine and then **won't open for readers**. The upload-time warning (§3) now names this, so at least it announces itself. |
+| **Meilisearch** | Recommended, not required | Falls back to MySQL `LIKE`, which works but **does not scale** as the primary search — it full-scans. Bind to `127.0.0.1` and set a master key (§7). |
+| **Redis** | Optional | On Linux use **real Redis**, not Memurai. Memurai is a Windows-only Redis-compatible build, and its Developer Edition self-shutdown problem (§8.5) simply does not exist there. |
+| Frontend Node/npm | **Build-time only** | `npm run build` produces static files in `dist/`. The server (or Vercel) just serves them; no Node runs in production for the frontend. |
+| **Laragon** | **No** | A Windows dev bundle (PHP + MySQL + Apache in one). Its parts are installed individually on a server. |
+| `scripts\dev-services.ps1` | **No** | Windows-local convenience. On Linux `systemd` does this job and does it at boot, properly. |
+| Startup-folder / Task Scheduler entries | **No** | Same — replaced by `systemd` units. |
+| Smart App Control / oxlint issue (#21) | **No** | Purely a local Windows policy problem. |
+
+**The headline:** most of the *pain* in §8.5 — services not auto-starting, Memurai quitting after ten days, login-only startup scripts — is **Windows-desktop pain that disappears on a Linux server**, where `systemd` starts everything at boot and restarts it on failure by default. What genuinely carries over is the dependency list itself: **PHP, MySQL, Node, qpdf**, plus optional Meilisearch and Redis.
+
+**Important caveat about the current setup.** Per §3 ("First deployment"), the frontend is on Vercel but the **backend is still this very machine**, exposed through a `cloudflared` tunnel. So right now "production" *is* this PC: if MySQL isn't started, or the machine sleeps, or Meilisearch is down, the live site is affected exactly as local development would be. That is fine for testing, but it is not a deployment — a real host (§7) is still the plan, and the quick tunnel's hostname also changes on every restart.
