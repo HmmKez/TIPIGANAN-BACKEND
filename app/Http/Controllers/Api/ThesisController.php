@@ -8,6 +8,7 @@ use App\Models\ReadingHistory;
 use App\Models\SignedUrlToken;
 use App\Models\Thesis;
 use App\Models\ThesisFileVersion;
+use App\Support\PdfNormalizer;
 use App\Support\ThesisFilePurger;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -319,6 +320,11 @@ class ThesisController extends Controller
         $pdfPath = $request->file('pdf_file')
             ->store('theses', 'local');
 
+        // Rewrite into an FPDI-compatible structure if needed (see
+        // PdfNormalizer) — best-effort, never blocks the upload if qpdf
+        // isn't installed on this machine yet.
+        PdfNormalizer::normalize(Storage::disk('local')->path($pdfPath));
+
         // Fixity: record a SHA-256 of the stored file so silent
         // corruption/tampering can be detected later (theses:verify-checksums).
         $checksum = hash_file('sha256', Storage::disk('local')->path($pdfPath));
@@ -433,6 +439,12 @@ class ThesisController extends Controller
 
         $oldPath = $thesis->file_path;
         $newPath = $request->file('pdf_file')->store('theses', 'local');
+
+        // Rewrite into an FPDI-compatible structure if needed (see
+        // PdfNormalizer) — best-effort, never blocks the replace if qpdf
+        // isn't installed on this machine yet.
+        PdfNormalizer::normalize(Storage::disk('local')->path($newPath));
+
         // Fixity hash of the new file (see store()).
         $newChecksum = hash_file('sha256', Storage::disk('local')->path($newPath));
 

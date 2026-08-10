@@ -5,6 +5,7 @@ namespace App\Support;
 use Closure;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\RateLimiter;
 use Throwable;
 
 // Wraps the Cache facade so Redis is a pure performance optimization, never
@@ -71,6 +72,98 @@ class SafeCache
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    // RateLimiter is also backed by the Cache facade, so it fails the exact
+    // same way when Redis is unreachable. These wrappers apply the same
+    // "degrade gracefully" rule: if we can't reliably count attempts, we
+    // fail OPEN (let the request through) rather than failing closed and
+    // locking everyone out just because the cache backend is down. That's
+    // the right tradeoff for a login form — a rare missed rate-limit window
+    // during a Redis outage is far cheaper than every user being unable to
+    // log in at all.
+
+    public static function tooManyAttempts(string $key, int $maxAttempts): bool
+    {
+        if (self::circuitOpen()) {
+            return false;
+        }
+
+        try {
+            return RateLimiter::tooManyAttempts($key, $maxAttempts);
+        } catch (Throwable $e) {
+            self::tripCircuit();
+            Log::warning("Cache unavailable, skipping rate limit check for [{$key}].", [
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
+    }
+
+    public static function hit(string $key, int $decaySeconds): void
+    {
+        if (self::circuitOpen()) {
+            return;
+        }
+
+        try {
+            RateLimiter::hit($key, $decaySeconds);
+        } catch (Throwable $e) {
+            self::tripCircuit();
+            Log::warning("Cache unavailable, could not record attempt for [{$key}].", [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    public static function clear(string $key): void
+    {
+        if (self::circuitOpen()) {
+            return;
+        }
+
+        try {
+            RateLimiter::clear($key);
+        } catch (Throwable $e) {
+            self::tripCircuit();
+            Log::warning("Cache unavailable, could not clear rate limit for [{$key}].", [
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    public static function availableIn(string $key): int
+    {
+        if (self::circuitOpen()) {
+            return 0;
+        }
+
+        try {
+            return RateLimiter::availableIn($key);
+        } catch (Throwable $e) {
+            self::tripCircuit();
+            Log::warning("Cache unavailable, could not read lockout time for [{$key}].", [
+                'error' => $e->getMessage(),
+            ]);
+
+            return 0;
+        }
+    }
+
+    // Exposed so other layers that talk to the cache backend directly — e.g.
+    // SafeThrottleRequests, which runs as route middleware before any
+    // controller code (and therefore before it could call the methods
+    // above) — can share the same circuit-breaker state instead of each
+    // maintaining its own.
+    public static function isDown(): bool
+    {
+        return self::circuitOpen();
+    }
+
+    public static function markDown(): void
+    {
+        self::tripCircuit();
     }
 
     private static function circuitPath(): string

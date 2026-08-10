@@ -29,6 +29,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'role'               => RoleMiddleware::class,
             'permission'         => PermissionMiddleware::class,
             'role_or_permission' => RoleOrPermissionMiddleware::class,
+            // Overrides the framework default so throttle:api / throttle:auth
+            // degrade gracefully instead of 500ing when the cache backend
+            // (Redis) is unreachable. See app/Http/Middleware/SafeThrottleRequests.php.
+            'throttle'           => \App\Http\Middleware\SafeThrottleRequests::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

@@ -5,9 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\User;
+use App\Support\SafeCache;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Validation\ValidationException;
@@ -81,8 +81,8 @@ class AuthController extends Controller
         // often — only by repeatedly getting the password wrong.
         $throttleKey = $this->loginThrottleKey($request);
 
-        if (RateLimiter::tooManyAttempts($throttleKey, self::MAX_LOGIN_ATTEMPTS)) {
-            $seconds = RateLimiter::availableIn($throttleKey);
+        if (SafeCache::tooManyAttempts($throttleKey, self::MAX_LOGIN_ATTEMPTS)) {
+            $seconds = SafeCache::availableIn($throttleKey);
 
             throw ValidationException::withMessages([
                 'email' => ["Too many failed login attempts. Please try again in {$seconds} seconds."],
@@ -92,14 +92,14 @@ class AuthController extends Controller
         $user = User::where('email', $request->email)->first();
 
         if (! $user || ! Hash::check($request->password, $user->password)) {
-            RateLimiter::hit($throttleKey, 60);
+            SafeCache::hit($throttleKey, 60);
 
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
 
-        RateLimiter::clear($throttleKey);
+        SafeCache::clear($throttleKey);
 
         if ($user->status === 'deactivated') {
             return response()->json([
