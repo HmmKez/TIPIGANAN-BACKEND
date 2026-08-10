@@ -794,6 +794,21 @@ The column is now a **grid whose label row is a fixed 18px**, so every plotting 
 
 **Verified** on the live staff dashboard: 5 bars, **1 distinct baseline** (previously one per label height), uniform 18px labels, codes on the axis with full names in the tooltip. Report tests pass.
 
+### Browse had three filters built twice each (user spotted it)
+User, looking at Browse: *"there's a filter card on the left… then another filter by the search bar… and a sort button at the top right. is there too much filter here?"* Correct — and the count was worse than it looked.
+
+**It was not "too many filters", it was three filters rendered twice.** Department appeared as sidebar radios **and** a top-bar dropdown; Year as a sidebar dropdown **and** a top-bar dropdown; Sort as a top-bar dropdown **and** the "Sort:" control beside the result count. Six controls doing three jobs. All bound to the same state, so nothing was out of sync — purely redundant.
+
+**The obvious fix would have broken mobile.** `.results-sidebar-panel` is `display: none` below 992px, so on a phone the top-bar dropdowns are not duplicates at all — they are the *only* filters. Deleting them would have silently removed filtering from every phone and tablet, which is the same class of bug as the old SearchPage that hand-rolled its filters and missed this exact rule.
+
+**What was done instead — one home per control, per screen size:**
+- **Sort was duplicated at every width**, so one copy was pure waste. Deleted the top-bar one; kept the one beside "About N results", which is where catalogues conventionally put it (it reorders the set it sits next to, rather than filtering it).
+- **Department and Year keep both copies in the markup**, with a **matched pair of media queries** — `max-width: 992px` hides the sidebar, `min-width: 993px` hides the top-bar controls. They are written adjacent to each other with a comment saying they must be changed together: wrong in one direction renders every filter twice, wrong in the other deletes filtering on mobile with nothing on screen to hint at it.
+- **Desktop keeps the sidebar deliberately, not arbitrarily**: the sidebar version shows per-department **counts** (CAST 15, CABM-B 1…) that the dropdown cannot, which stops a reader clicking into an empty department.
+- Removed the "Clear department filter" link — clearing one filter was already covered by the active-filter chip's X *and* Reset Filters. Three controls for one job.
+
+**Verified in a real browser (Playwright) at 375 / 768 / 992 / 993 / 1440 px** — both sides of the breakpoint, not just the comfortable middle. At every width: exactly one home for Department and Year, exactly one Sort, and no horizontal scroll. Then verified they still *work*, since visible is not the same as functional: the desktop sidebar radio took results 7 → 4, Reset Filters restored 7, the mobile dropdown gave the identical 7 → 4, and Sort A–Z reordered the first card.
+
 ### The test suite could be switched off by the dev server (flaky, and it failed OPEN)
 Found on 2026-08-11 while running the suite immediately after some `curl` health checks — two `AuthTest` rate-limiting tests failed that had passed minutes earlier, with no app code changed in between.
 
