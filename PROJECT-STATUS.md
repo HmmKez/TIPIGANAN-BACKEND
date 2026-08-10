@@ -34,6 +34,8 @@
 - **Team**: Group 7 — Concha, Esto, Mendez, Miano
 - **Both repos are on `dev`, and everything is committed and pushed to `origin/dev`** (verified clean as of 2026-07-13 — 0 uncommitted files on both, local `HEAD` == `origin/dev`). This session took the backend `d06b362 → b717dc6` and the frontend `f327598 → 85f047f`.
 
+> **➡ To install, run, or restart anything, go to §8 "Setup & Running the System".** It has the full dependency list with versions, first-time setup from a clean clone, the one-command service starter (`scripts\dev-services.ps1`), how to make Meilisearch/Redis/MySQL start and stay started on their own, and a symptom-to-cause troubleshooting table.
+
 ### Teammates pulling this — what they actually need
 
 They must be on the **`dev`** branch (not `main`). `git pull`, then, **in this order**:
@@ -90,6 +92,10 @@ app/
     VerifyThesisChecksums.php  NEW — `php artisan theses:verify-checksums` (fixity; §3 Tier 3)
     NormalizeThesisPdfs.php    NEW — `php artisan theses:normalize-pdfs` (backfill for PDFs stored
                                 before PdfNormalizer existed; --dry-run / --with-trashed)
+
+scripts/
+  dev-services.ps1             NEW — starts MySQL + Meilisearch (and Memurai if elevated), or
+                                -Status to just report. Polls ports rather than sleeping. See §8.2
   Http/Middleware/
     SecurityHeaders.php        NEW — nosniff/frame/referrer/permissions/HSTS on API responses (§3 Tier 2)
     SafeThrottleRequests.php   NEW — overrides the framework 'throttle' alias so route-level rate
@@ -788,6 +794,19 @@ The column is now a **grid whose label row is a fixed 18px**, so every plotting 
 
 **Verified** on the live staff dashboard: 5 bars, **1 distinct baseline** (previously one per label height), uniform 18px labels, codes on the axis with full names in the tooltip. Report tests pass.
 
+### The test suite could be switched off by the dev server (flaky, and it failed OPEN)
+Found on 2026-08-11 while running the suite immediately after some `curl` health checks — two `AuthTest` rate-limiting tests failed that had passed minutes earlier, with no app code changed in between.
+
+**Cause.** `SafeCache`'s circuit breaker is a **file on disk** (it has to survive the cache itself being the broken thing), but it lived at **one path shared by every environment**: `storage/framework/cache/redis-down.flag`. The dev server runs `CACHE_STORE=redis`, so with Redis down *every request* trips that flag. The test suite runs `CACHE_STORE=array`, which can never legitimately fail — but it read the same file, concluded its own cache was down, and **skipped rate limiting entirely**.
+
+So the suite passed or failed depending on **whether anyone had hit the dev server in the previous 15 seconds** (the breaker's TTL). Worse than flaky: it failed **open**, so a real throttling regression could have hidden behind it and still shown green.
+
+**Fix.** The flag is now scoped per environment (`redis-down.{environment}.flag`), so `testing` and `local` can't see each other's state. Production behaviour is unchanged.
+
+**Regression test** (`AuthTest`, 80 → 81): plants a foreign breaker flag and asserts login still throttles. Getting this test *right* took two attempts and the correction is the point — the first version created only the new environment-scoped filename, which the broken code never read, so it **passed against the bug**. It now plants the un-scoped legacy name as well, and is confirmed to fail (`429` expected, `200` received) against the old code. The cleanup only removes flags the test itself created, so it can't delete a breaker the dev server is relying on.
+
+**Verified** by running the full suite twice with the dev breaker deliberately tripped in between: 81/81 both times.
+
 ### PDFs that would not open, throttling that 500'd without Redis, and a CDN in the viewer
 Three defects that shared a shape — each one turned a dependency being unavailable into a hard failure. Written up together because they were fixed in one pass.
 
@@ -818,7 +837,7 @@ The free tier of `setasign/fpdi` cannot parse PDF 1.5+ **object streams / cross-
 ## 4. Known Issues / Explicitly Not Done
 
 1. **OPcache is disabled**, likely the dominant remaining performance bottleneck (~500ms flat tax on every request, confirmed via direct timing — a cached response was no faster than an uncached one). User declined to fix this since it's a system-wide PHP config change outside the project repo. Not revisited unless asked again.
-2. **Meilisearch auto-start is unreliable** — a Startup-folder script only fires at login, doesn't restart on crash. Discussed wrapping it as a real Windows service via NSSM (`winget install NSSM.NSSM`, `winget`-installable, same trust tier as Memurai) with a proper crash-restart — user said to leave it for now ("not a major issue, it just needs to be restarted").
+2. **Meilisearch auto-start is unreliable — and the specific reason is now confirmed.** The Startup-folder script fires **only at login**, so on a machine that just stays logged in it never runs again: this one had been up **26 days** with Meilisearch down since a failed start on 8 Aug. It also can't restart itself after a crash. Both NSSM (a real service with crash recovery) and a Task-Scheduler **at-startup** trigger are written out ready-to-run in §8.5; both need elevation. In the meantime `scripts\dev-services.ps1` starts it on demand with no elevation needed. User previously said to leave it ("not a major issue, it just needs to be restarted").
 3. **Brotli compression** — parked, needs a production hosting decision first (Nginx module vs. platform-native vs. not applicable to `artisan serve`).
 4. **Docker Desktop is broken** on this machine (WSL2/virtualization issue) — routed around with native binaries instead of fixing it.
 5. **Task Scheduler creation is blocked** in this Claude Code shell specifically (unrelated to #2 above, which is about Meilisearch's *reliability*, not this specific tool restriction).
@@ -836,7 +855,8 @@ The free tier of `setasign/fpdi` cannot parse PDF 1.5+ **object streams / cross-
 17. **Documentation (team's Chapter III doc) has drifted from the built system in places** — user is tracking/fixing this themselves, flagged for their defense: (a) "The system allows for custom citations for all theses" (Specific Objectives) — custom citations were *removed*; it's now one auto-generated APA + one MLA per thesis, editable in place; (b) guest access is self-contradictory in the doc (architecture section says guests browse titles/basic info, which the build does allow; Limitations says "No anonymous or guest access" — the build matches the architecture description, not the limitation). Not a code task — recorded so a future session doesn't "fix" the code to match an inconsistent doc. Offered a full doc-vs-build consistency pass; user declined for now.
 18. **qpdf is now a real runtime dependency for PDF viewing.** Without it, a PDF written by Word or a scanner uploads fine but cannot be watermarked, so it will not open in the viewer (§3). It degrades gracefully rather than failing the upload, which is the right behavior but does mean the failure surfaces later, at read time. Every teammate machine and the deploy host needs it; `theses:normalize-pdfs` repairs anything uploaded while it was missing.
 19. **The frontend still loads Font Awesome (cdnjs) and Inter (Google Fonts) from CDNs.** Unrelated to the pdf.js worker fix (§3) but the same class of hidden internet dependency: offline, or on a network that blocks those hosts, every icon in the app renders blank and the font falls back. Not fixed — self-hosting both is a separate change touching the whole UI, and the user hasn't raised it. Worth doing before any defense demo that might run on an untrusted network.
-20. **Memurai (Redis) was found stopped on this machine and could not be restarted from this shell** (`Start-Service` → access denied; needs an elevated PowerShell). The app is unaffected — `SafeCache` and the new `SafeThrottleRequests` degrade cleanly, which is exactly how the Redis-down path got verified — but until it's started, caching and rate limiting are both inert locally. Start it with `Start-Service Memurai` from an elevated prompt.
+20. **Memurai (Redis) keeps stopping because Developer Edition shuts itself down on purpose — root cause found 2026-08-11.** Not a crash and not a misconfiguration: its log records *"Memurai Developer Edition automatic shutdown"* after a 10-day run (16 Jul → 26 Jul), and the service reports `ExitCode 1067`. Because Windows sees that as a failure, **service recovery can auto-restart it** — the one-time elevated fix is in §8.5. Until then the app is unaffected (`SafeCache` + `SafeThrottleRequests` degrade cleanly, which is how the Redis-down path got verified) but caching and rate limiting stay inert. Still pending: needs an elevated prompt, which the Claude Code shell doesn't have.
+21. **`npm run lint` (oxlint) fails with "Cannot find native binding" — a Windows policy, not a dependency problem.** Smart App Control is enforcing on this machine and blocks oxlint's unsigned native binary (`cause: An Application Control policy has blocked this file`). Confirmed **pre-existing**: the binary is dated 2026-06-25, months before the `pdfjs-dist` install, so the dependency change did not cause it. `npm run build` is unaffected and clean, so this blocks only linting. Fix is either allowing the binary through Smart App Control or replacing oxlint; neither attempted.
 
 ---
 
@@ -846,7 +866,7 @@ The free tier of `setasign/fpdi` cannot parse PDF 1.5+ **object streams / cross-
 
 **Every custom artisan command** (all seven — the scheduled ones fire on their own only once the deploy cron exists, see §7):
 ```bash
-php artisan test                              # full backend test suite — 80 tests, all passing
+php artisan test                              # full backend test suite — 81 tests, all passing
 
 # Search index
 php artisan scout:sync-index-settings         # push Meilisearch filterable-attribute config
@@ -994,7 +1014,7 @@ Organized by capability area, describing **the system as it stands today** — n
 - **HTTPS enforced in production** (with reverse-proxy trust, so signed PDF-viewer URLs stay correct), and CORS locked to the configured frontend origin rather than any localhost.
 
 ### 6.15 Quality Assurance
-- Automated test suite (80 tests) covering the critical paths: authentication + password policy + login rate-limiting (including the browsing-must-not-consume-the-login-limit regression), role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users (including that displayed counts never advertise theses a user cannot open), Super-Admin-only editing of the active term and the landing hero image, the public landing payload (including a cache-serialization regression test that runs against a *serializing* cache store, since the suite's default in-memory store cannot reproduce it), the full file-replace → version-restore → checksum lifecycle, and PDF normalization (graceful degradation without qpdf, object-stream PDFs becoming FPDI-readable, a size guard pinning the `--qdf` decision, encrypted-PDF recovery, the assertion that a password-protected PDF is refused and left intact, and that an unviewable upload still succeeds but returns a warning naming the right cause). Run with `php artisan test`.
+- Automated test suite (81 tests) covering the critical paths: authentication + password policy + login rate-limiting (including the browsing-must-not-consume-the-login-limit regression), role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users (including that displayed counts never advertise theses a user cannot open), Super-Admin-only editing of the active term and the landing hero image, the public landing payload (including a cache-serialization regression test that runs against a *serializing* cache store, since the suite's default in-memory store cannot reproduce it), the full file-replace → version-restore → checksum lifecycle, and PDF normalization (graceful degradation without qpdf, object-stream PDFs becoming FPDI-readable, a size guard pinning the `--qdf` decision, encrypted-PDF recovery, the assertion that a password-protected PDF is refused and left intact, and that an unviewable upload still succeeds but returns a warning naming the right cause). Run with `php artisan test`.
 
 ---
 
@@ -1029,8 +1049,171 @@ From the deploy-readiness diagnostic. **Tier 1 = must-do before going live; Tier
 - [ ] Meilisearch + queue worker (if async) supervised (NSSM on Windows / systemd on Linux).
 
 ### Tier 3 — quality / repository completeness
-- [x] **Automated tests** — DONE: 80 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility + displayed counts, active-term settings, landing payload + hero upload + cache-serialization regression, file-versioning + checksum, PDF normalization + the `--qdf` size guard). Room to grow (search, reports, citations) but the critical paths are covered. They earned their keep: the suite is what pinned down the login-429 bug and the archived-theses miscount, and now guards against both returning.
+- [x] **Automated tests** — DONE: 81 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility + displayed counts, active-term settings, landing payload + hero upload + cache-serialization regression, file-versioning + checksum, PDF normalization + the `--qdf` size guard). Room to grow (search, reports, citations) but the critical paths are covered. They earned their keep: the suite is what pinned down the login-429 bug and the archived-theses miscount, and now guards against both returning.
 - [x] **Timezone** — DONE: `Asia/Manila`, env-driven (`APP_TIMEZONE`). REMAINING (deploy): the prod template already sets it — just confirm it's applied on the fresh DB before go-live.
 - [x] **Fixity/checksums (#12)** — DONE: SHA-256 per file + `theses:verify-checksums` (weekly). REMAINING (deploy): the weekly schedule fires via the same `schedule:run` cron as Tier 2.
 - [x] **Load-test PDF-viewing** — DONE (dev floor measured): ~34ms/stamp, ~7–9 req/s at OPcache-off/4-worker; see §3 for the full interpretation + prod extrapolation. REMAINING: re-run against the deployed FPM+OPcache server with a large scanned thesis to get the real production ceiling.
 - [ ] Still parked (user's call): **rights/license field (#13)**, **NAS wiring (#16)**, **documentation drift (#17)**.
+
+---
+
+## 8. Setup & Running the System — the complete guide
+
+**Everything needed to take this machine (or a fresh one) from nothing to a running system, and to keep the background services up without babysitting them.** Written 2026-08-11 against the verified real state of this machine, not from memory.
+
+### 8.1 What actually has to be running
+
+Only **one** of these is genuinely required. The app is built so the other two can be down without breaking anything — that isn't a happy accident, it's the `SafeCache` / search-fallback design described in §3 and §6.12.
+
+| | Port | Required? | If it's down |
+|---|---|---|---|
+| **MySQL** (Laragon) | 3306 | **YES** | Everything 500s — even loading a page, since sessions live in the DB. |
+| **Meilisearch** | 7700 | No | Search still works via a MySQL `LIKE` fallback. Loses typo-tolerance and relevance ranking. |
+| **Memurai** (Redis) | 6379 | No | Caching and rate limiting go inert. Pages compute fresh (slightly slower). **Logins still work** — verified live with Redis genuinely down. |
+| Backend `php artisan serve` | 8000 | YES | — |
+| Frontend `npm run dev` | 5173 | YES | CORS accepts any localhost port, so a bumped port is fine. |
+
+### 8.2 The short version — starting everything
+
+```powershell
+# From the backend repo root. Starts MySQL + Meilisearch, reports Memurai.
+powershell -ExecutionPolicy Bypass -File scripts\dev-services.ps1
+
+# Just check what's up, change nothing:
+powershell -ExecutionPolicy Bypass -File scripts\dev-services.ps1 -Status
+```
+
+Then two terminals:
+
+```bash
+php artisan serve          # backend  -> 127.0.0.1:8000
+npm run dev                # frontend -> localhost:5173   (in tipiganan-frontend)
+```
+
+`scripts/dev-services.ps1` discovers the MySQL path itself (newest install under `C:\laragon\bin\mysql`), skips anything already running, and **polls the port instead of sleeping a fixed guess** — a cold Meilisearch start takes ~10s to reopen its index before it binds, and an earlier fixed 6-second wait reported a perfectly healthy service as failed.
+
+### 8.3 Installed tooling on this machine (verified 2026-08-11)
+
+| Tool | Version | Notes |
+|---|---|---|
+| PHP | 8.3.30 (ZTS) | via Laragon. **OPcache is off** — see Known Issue #1. |
+| Composer | 2.9.7 | |
+| Node.js | 24.15.0 | **Required** — the OCR pipeline shells out to `node ocr/extract.cjs`. |
+| npm | 11.12.1 | The backend has its **own** `package.json` for OCR — `npm install` in *both* repos. |
+| MySQL | 8.4.3 | `C:\laragon\bin\mysql\mysql-8.4.3-winx64`, data in `C:\laragon\data\mysql-8.4` |
+| Meilisearch | 1.49.0 | `C:\Users\conch\meilisearch\meilisearch.exe` |
+| Memurai | Developer Edition | `C:\Program Files\Memurai` — see the warning in 8.5 |
+| qpdf | 12.3.2 | `C:\Program Files\qpdf 12.3.2\bin` — **not added to PATH by its own installer** |
+| Git | 2.54.0 | |
+
+### 8.4 First-time setup, from a clean clone
+
+```bash
+# Backend
+composer install
+npm install                       # the OCR pipeline's own dependencies
+cp .env.example .env              # NEVER overwrite an existing .env - it holds your DB password
+php artisan key:generate
+php artisan migrate
+php artisan storage:link          # category covers / avatars / landing hero are served from here
+php artisan categories:restore-covers   # department seals live in the DB, so each machine needs this
+php artisan db:seed               # optional sample data
+
+# Frontend
+npm install
+```
+
+Then add these to `.env` by hand (see "Teammates pulling this" near the top of this file for why these specific keys):
+
+```ini
+APP_TIMEZONE=Asia/Manila
+QPDF_BINARY="C:/Program Files/qpdf 12.3.2/bin/qpdf.exe"
+```
+
+> **Forward slashes in `QPDF_BINARY`.** Dotenv reads a backslash inside quotes as an escape sequence and then refuses to parse the *entire* `.env`, so the app won't boot at all. Hit for real on 2026-08-10.
+
+### 8.5 Making the services stay up — the part that keeps biting
+
+**Memurai (Redis): it shuts itself down on purpose.** This is the actual reason it keeps needing a restart, and it is neither a crash nor a misconfiguration. Its own log:
+
+```
+16 Jul 17:29:38 * Ready to accept connections tcp
+26 Jul 20:06:52 # Memurai Developer Edition automatic shutdown...
+26 Jul 20:06:52 # Memurai will now exit (_without_ saving), bye bye...
+```
+
+It ran 10 days, then **Developer Edition terminated itself by design**. The service is set to Automatic and reports `ExitCode 1067` ("process terminated unexpectedly"), so Windows classes it as a failure — which means **Windows service recovery can restart it automatically**. Run **once, in an elevated PowerShell**:
+
+```powershell
+Start-Service Memurai
+sc.exe failure Memurai reset= 0 actions= restart/5000/restart/5000/restart/60000
+```
+
+That restarts it 5s after it dies, again after 5s, then every 60s — so the periodic self-shutdown heals itself instead of leaving Redis down for weeks. (The spaces after `reset=` and `actions=` are required by `sc.exe` syntax; not a typo.) **Not done yet — needs elevation, which the Claude Code shell doesn't have.**
+
+**Meilisearch: its auto-start only fires at login, which is the flaw.** `Startup\start-meilisearch.vbs` → `C:\Users\conch\meilisearch\start-meilisearch.ps1`. That never runs on a machine that simply stays logged in — this one had been up **26 days**, and Meilisearch had been down since a failed start on 8 Aug (`Access is denied (os error 5)`, a transient lock; it starts fine now). It also cannot restart itself after a crash. Two proper fixes, both needing elevation:
+
+```powershell
+# Option A - a real Windows service with crash recovery (recommended)
+winget install NSSM.NSSM
+nssm install Meilisearch "C:\Users\conch\meilisearch\meilisearch.exe" --http-addr 127.0.0.1:7700 --no-analytics
+nssm set Meilisearch AppDirectory "C:\Users\conch\meilisearch"
+nssm set Meilisearch Start SERVICE_AUTO_START
+nssm start Meilisearch
+
+# Option B - Task Scheduler AT STARTUP (not at logon), so a reboot is enough
+schtasks /create /tn "MeilisearchAutoStart" /tr "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\Users\conch\meilisearch\start-meilisearch.ps1" /sc onstart /ru SYSTEM
+```
+
+> **`AppDirectory` matters.** Meilisearch resolves its index (`data.ms`) relative to the working directory. Launched from somewhere else it silently creates a **second, empty index** and every search returns nothing — with no error anywhere.
+
+**MySQL: Laragon does not register it as a Windows service**, so nothing starts it at boot. Either open Laragon and press Start, run `scripts\dev-services.ps1`, or register it permanently (elevated, once):
+
+```powershell
+& 'C:\laragon\bin\mysql\mysql-8.4.3-winx64\bin\mysqld.exe' --install MySQL84 --defaults-file='C:\laragon\bin\mysql\mysql-8.4.3-winx64\my.ini'
+Set-Service MySQL84 -StartupType Automatic
+Start-Service MySQL84
+```
+
+If you register it as a service, Laragon's own Start/Stop button will fight with it — pick one owner and stick to it.
+
+### 8.6 Keeping the search index honest
+
+Meilisearch drifts whenever theses change while it's down — the index held **23 documents against 13 real theses** on 2026-08-11 (leftovers from deleted items). Resync:
+
+```bash
+php artisan scout:sync-index-settings          # filterable attributes (do this first)
+php artisan scout:flush "App\Models\Thesis"
+php artisan scout:import "App\Models\Thesis"
+```
+
+Sanity check — these two numbers must match:
+
+```bash
+curl -s http://127.0.0.1:7700/indexes/theses/stats     # numberOfDocuments
+php artisan tinker --execute="echo App\Models\Thesis::count();"
+```
+
+### 8.7 Troubleshooting — symptom to cause
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Every page 500s | MySQL down | `scripts\dev-services.ps1`, or start Laragon |
+| Login says "Could not reach the server" | Backend not running | `php artisan serve`; CORS already allows any localhost port |
+| Search returns nothing at all | Meilisearch running against an **empty second index** (wrong working directory), or a stale index | Resync per 8.6; check where `data.ms` actually is |
+| Search works but no typo tolerance | Meilisearch down — MySQL fallback in use | Start it; nothing is broken |
+| Pages slower than usual; one request ~2.4s | Redis down. The circuit breaker re-tests every 15s, so one request in each window pays the connect timeout | Start Memurai (8.5) |
+| A thesis won't open: "Could not load the PDF" | qpdf missing, or the file is password-protected | `php artisan theses:normalize-pdfs --dry-run --with-trashed` lists them; install qpdf; see §3 |
+| Upload warns "cannot be opened in the viewer" | Same as above — the warning names which cause | Follow the message; no re-upload needed in the qpdf case |
+| `npm run lint` dies on "Cannot find native binding" | **Windows Smart App Control** is blocking oxlint's unsigned native binary (enforcing on this machine). Pre-existing, unrelated to any dependency change | `npm run build` is unaffected. Known Issue #21 |
+| Category cards show blank brand panels | `categories:restore-covers` never run on this machine | Run it |
+
+### 8.8 Health check — is everything actually working?
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\dev-services.ps1 -Status   # services
+php artisan test                                                            # 81 tests
+php artisan theses:normalize-pdfs --dry-run --with-trashed                  # any unviewable PDFs?
+php artisan theses:verify-checksums                                         # file integrity
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/api/categories
+```

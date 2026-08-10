@@ -166,9 +166,22 @@ class SafeCache
         self::tripCircuit();
     }
 
+    // Scoped per environment, and it has to be.
+    //
+    // The breaker is a file on disk rather than a cache entry (it has to
+    // survive the cache being the thing that's broken), but a single shared
+    // path leaks state ACROSS environments. Concretely: the dev server runs
+    // with CACHE_STORE=redis, so with Redis down every request trips this
+    // flag — and the test suite, which runs with CACHE_STORE=array and can
+    // therefore never legitimately trip it, would read that flag and behave as
+    // if its own cache were down. That silently disables rate limiting inside
+    // tests, so the login-throttle assertions failed purely because a request
+    // had hit the dev server in the previous 15 seconds. A suite whose result
+    // depends on that is worse than no suite: it fails OPEN, so a real
+    // rate-limiting regression could hide behind it.
     private static function circuitPath(): string
     {
-        return storage_path('framework/cache/redis-down.flag');
+        return storage_path('framework/cache/redis-down.' . app()->environment() . '.flag');
     }
 
     private static function circuitOpen(): bool

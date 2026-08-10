@@ -163,4 +163,58 @@ class AuthTest extends TestCase
         $this->postJson('/api/auth/login', ['email' => 'bystander@example.com', 'password' => 'Password123'])
             ->assertOk();
     }
+
+    public function test_the_dev_servers_cache_outage_does_not_disable_throttling_in_tests(): void
+    {
+        // SafeCache's circuit breaker is a file on disk (it has to survive the
+        // cache itself being broken). It used to live at ONE path for every
+        // environment, so the dev server — which runs CACHE_STORE=redis and
+        // trips the breaker on every request while Redis is down — would
+        // silently switch rate limiting OFF inside this suite, which runs
+        // CACHE_STORE=array and can never legitimately trip it.
+        //
+        // The effect was a suite that passed or failed depending on whether
+        // anyone had hit the dev server in the previous 15 seconds, and it
+        // failed OPEN: a genuine throttling regression could hide behind it.
+        // This recreates that exact condition.
+        // Both names on purpose. 'redis-down.flag' is the un-scoped path the
+        // broken version read, so its presence is what actually reproduces the
+        // failure; 'redis-down.local.flag' is what the dev server writes now.
+        // Touching only the latter would make this test vacuous — it passed
+        // against the broken code, because the broken code never looked there.
+        $foreignFlags = [
+            storage_path('framework/cache/redis-down.flag'),
+            storage_path('framework/cache/redis-down.local.flag'),
+        ];
+
+        @mkdir(dirname($foreignFlags[0]), 0777, true);
+
+        // Only clean up what this test actually created. The dev server owns
+        // its own breaker file, and deleting one it is relying on would make
+        // its next request pay a fresh Redis connect timeout for no reason.
+        $created = array_values(array_filter($foreignFlags, fn ($f) => ! file_exists($f)));
+
+        foreach ($foreignFlags as $flag) {
+            touch($flag);
+        }
+
+        try {
+            User::factory()->create([
+                'email'    => 'scoped@example.com',
+                'password' => Hash::make('Password123'),
+                'role'     => 'student',
+            ]);
+
+            for ($i = 0; $i < 6; $i++) {
+                $this->postJson('/api/auth/login', ['email' => 'scoped@example.com', 'password' => 'nope']);
+            }
+
+            $this->postJson('/api/auth/login', ['email' => 'scoped@example.com', 'password' => 'Password123'])
+                ->assertStatus(429);
+        } finally {
+            foreach ($created as $flag) {
+                @unlink($flag);
+            }
+        }
+    }
 }
