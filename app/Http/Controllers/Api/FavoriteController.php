@@ -27,7 +27,12 @@ class FavoriteController extends Controller
             ->exists();
 
         if ($exists) {
-            return response()->json(['message' => 'Already in favorites.'], 409);
+            // "Bookmark", not "favorite" — the feature is called a bookmark
+            // everywhere a user can read it, and these messages are the only
+            // part of the API that says otherwise. The table, model and routes
+            // deliberately keep the older name; renaming those would be a
+            // migration and an endpoint change for no user-visible gain.
+            return response()->json(['message' => 'Already bookmarked.'], 409);
         }
 
         $favorite = Favorite::create([
@@ -46,6 +51,6 @@ class FavoriteController extends Controller
             ->where('thesis_id', $thesisId)
             ->delete();
 
-        return response()->json(['message' => 'Removed from favorites.']);
+        return response()->json(['message' => 'Bookmark removed.']);
     }
 }
