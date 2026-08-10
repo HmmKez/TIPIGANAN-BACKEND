@@ -149,6 +149,75 @@ class PdfNormalizerTest extends TestCase
         $this->assertFileDoesNotExist($target . '.orig.bak');
     }
 
+    public function test_it_makes_an_encrypted_pdf_readable_when_it_opens_without_a_password(): void
+    {
+        $qpdf = $this->qpdfPath();
+
+        if (! $qpdf) {
+            $this->markTestSkipped('qpdf is not installed on this machine.');
+        }
+
+        config(['thesis.qpdf_binary' => $qpdf]);
+
+        // Owner password, no user password: the shape Acrobat's "restrict
+        // editing" and most journal downloads produce. Opens fine in any
+        // reader, which is exactly why nobody suspects it — but FPDI refuses
+        // it and the thesis never displays.
+        $source = $this->workDir . '/enc-source.pdf';
+        $target = $this->workDir . '/encrypted.pdf';
+        file_put_contents($source, $this->minimalPdf(50));
+
+        (new Process([
+            $qpdf, '--encrypt', '--user-password=', '--owner-password=owner',
+            '--bits=256', '--', $source, $target,
+        ]))->run();
+
+        $this->assertFileExists($target, 'Could not build the encrypted fixture.');
+
+        $readable = true;
+        try {
+            (new WatermarkPdf())->setSourceFile($target);
+        } catch (\Throwable $e) {
+            $readable = false;
+        }
+        $this->assertFalse($readable, 'Fixture was not actually rejected by FPDI.');
+
+        $this->assertTrue(PdfNormalizer::normalize($target));
+        $this->assertSame(1, (new WatermarkPdf())->setSourceFile($target));
+    }
+
+    public function test_it_refuses_a_pdf_that_needs_a_password_and_leaves_it_intact(): void
+    {
+        $qpdf = $this->qpdfPath();
+
+        if (! $qpdf) {
+            $this->markTestSkipped('qpdf is not installed on this machine.');
+        }
+
+        config(['thesis.qpdf_binary' => $qpdf]);
+
+        // The line that must not be crossed: --decrypt exists to repair files
+        // the uploader can already open, not to strip protection from a
+        // document that genuinely requires a password. qpdf cannot open this
+        // one at all, so normalize() must fail and leave the bytes untouched.
+        $source = $this->workDir . '/pw-source.pdf';
+        $target = $this->workDir . '/password-protected.pdf';
+        file_put_contents($source, $this->minimalPdf(50));
+
+        (new Process([
+            $qpdf, '--encrypt', '--user-password=secret', '--owner-password=owner',
+            '--bits=256', '--', $source, $target,
+        ]))->run();
+
+        $this->assertFileExists($target, 'Could not build the password-protected fixture.');
+        $before = md5_file($target);
+
+        $this->assertFalse(PdfNormalizer::normalize($target), 'A password-protected PDF must not report success.');
+        $this->assertSame($before, md5_file($target), 'The file must be left exactly as uploaded.');
+        $this->assertFileDoesNotExist($target . '.normalized.tmp');
+        $this->assertFileDoesNotExist($target . '.orig.bak');
+    }
+
     public function test_it_does_not_inflate_the_file_the_way_qdf_mode_would(): void
     {
         $qpdf = $this->qpdfPath();

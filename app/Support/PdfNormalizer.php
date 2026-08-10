@@ -32,13 +32,27 @@ class PdfNormalizer
     // exactly the pair FPDI 2.x cannot parse. Compression of the page content
     // itself is untouched, because FPDI reads Flate-compressed streams fine.
     //
+    // --decrypt covers the OTHER half of what FPDI refuses. Encryption is not
+    // the same problem as compression, and it is at least as common: Acrobat's
+    // "restrict editing", most journal downloads and some scanners produce a
+    // PDF with an owner password and NO user password. It opens normally in
+    // every reader, so nothing looks wrong — but FPDI rejects it outright
+    // ("This PDF document is encrypted"), and without this the thesis simply
+    // never displays. Verified against RC4-40, AES-128 and AES-256 fixtures:
+    // all three fail on upload and all three open after this.
+    //
+    // This does not bypass access control. qpdf can only decrypt what already
+    // opens WITHOUT a password; a PDF carrying a real user password makes qpdf
+    // exit non-zero, which lands in the catch below and leaves the file exactly
+    // as uploaded. Verified.
+    //
     // Do NOT add --qdf here. It rewrites the file into qpdf's uncompressed,
     // human-readable debugging form, which is not needed for FPDI and is
     // enormously expensive: measured on a real 2.0 MB thesis, --qdf produced
     // 44.4 MB where this produces 2.7 MB (16x), and since servePdf() stamps
     // and streams the file on EVERY view, that difference is paid again on
     // every single read, not just once on disk.
-    private const QPDF_ARGS = ['--object-streams=disable'];
+    private const QPDF_ARGS = ['--object-streams=disable', '--decrypt'];
 
     public static function normalize(string $absolutePath): bool
     {
