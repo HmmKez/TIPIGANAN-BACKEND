@@ -4,8 +4,8 @@ namespace Tests\Feature;
 
 use App\Services\Pdf\WatermarkPdf;
 use App\Support\PdfNormalizer;
-use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
+use Tests\Support\MakesPdfs;
 use Tests\TestCase;
 
 // PdfNormalizer rewrites uploaded PDFs into a structure the free FPDI tier can
@@ -14,6 +14,8 @@ use Tests\TestCase;
 // won't open in the viewer at all), or losing the file outright.
 class PdfNormalizerTest extends TestCase
 {
+    use MakesPdfs;
+
     private string $workDir;
 
     protected function setUp(): void
@@ -34,60 +36,6 @@ class PdfNormalizerTest extends TestCase
         }
 
         parent::tearDown();
-    }
-
-    private function qpdfPath(): ?string
-    {
-        $configured = config('thesis.qpdf_binary', 'qpdf');
-
-        if ($configured !== 'qpdf' && is_file($configured)) {
-            return $configured;
-        }
-
-        return (new ExecutableFinder())->find('qpdf');
-    }
-
-    // A one-page PDF with a classic cross-reference table, written by hand so
-    // the test doesn't depend on any fixture file being committed.
-    //
-    // $textOps pads the content stream with repeated drawing operations. A
-    // stream of a few dozen bytes compresses to nothing and decompresses to
-    // nothing, so a small fixture cannot show the difference between a
-    // compressed rewrite and --qdf's uncompressed one; the size test needs a
-    // stream big enough for that gap to be visible.
-    private function minimalPdf(int $textOps = 1): string
-    {
-        $content = '';
-        for ($i = 0; $i < $textOps; $i++) {
-            $content .= 'BT /F1 24 Tf 100 700 Td (Fixture line ' . $i . ") Tj ET\n";
-        }
-
-        $objects = [
-            "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
-            "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
-            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << >> >>\nendobj\n",
-            "4 0 obj\n<< /Length " . strlen($content) . " >>\nstream\n" . $content . "endstream\nendobj\n",
-        ];
-
-        $pdf     = "%PDF-1.4\n";
-        $offsets = [];
-
-        foreach ($objects as $object) {
-            $offsets[] = strlen($pdf);
-            $pdf .= $object;
-        }
-
-        $xrefPos = strlen($pdf);
-        $pdf .= "xref\n0 " . (count($objects) + 1) . "\n0000000000 65535 f \n";
-
-        foreach ($offsets as $offset) {
-            $pdf .= sprintf("%010d 00000 n \n", $offset);
-        }
-
-        $pdf .= 'trailer
-<< /Size ' . (count($objects) + 1) . " /Root 1 0 R >>\nstartxref\n{$xrefPos}\n%%EOF\n";
-
-        return $pdf;
     }
 
     public function test_it_leaves_the_file_untouched_when_qpdf_is_not_installed(): void

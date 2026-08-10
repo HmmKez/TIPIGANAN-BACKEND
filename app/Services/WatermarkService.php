@@ -48,4 +48,22 @@ class WatermarkService
         // Return as string (in-memory, not saved to disk)
         return $pdf->Output('S');
     }
+
+    // Can this file actually be stamped, i.e. can a reader open it at all?
+    //
+    // Asked at upload time so a PDF that FPDI refuses is caught while the staff
+    // member is still on the page and can do something about it, instead of
+    // surfacing weeks later as a reader's "Could not load the PDF". Only the
+    // header/xref is parsed here — no pages are imported and nothing is
+    // rendered — so it costs a fraction of a real stamp.
+    public function canStamp(string $absolutePath): bool
+    {
+        try {
+            (new WatermarkPdf())->setSourceFile($absolutePath);
+
+            return true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
 }

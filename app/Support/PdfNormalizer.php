@@ -4,6 +4,7 @@ namespace App\Support;
 
 use Illuminate\Support\Facades\Log;
 use Symfony\Component\Process\Exception\ExceptionInterface as ProcessExceptionInterface;
+use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 
 // Some PDF producers (Word/LibreOffice "Save as PDF", scanners, some OCR
@@ -53,6 +54,26 @@ class PdfNormalizer
     // and streams the file on EVERY view, that difference is paid again on
     // every single read, not just once on disk.
     private const QPDF_ARGS = ['--object-streams=disable', '--decrypt'];
+
+    // Is qpdf actually installed here? Lets the caller tell the two reasons a
+    // PDF ends up unviewable apart, which need completely different responses:
+    // "this machine is missing a tool the admin must install" is not something
+    // the staff member uploading can fix, whereas "this particular file is
+    // protected or damaged" is. A single vague message would send them chasing
+    // the wrong one.
+    public static function isAvailable(): bool
+    {
+        $binary = config('thesis.qpdf_binary', 'qpdf');
+
+        // An absolute path (how Windows has to configure it, since the
+        // installer adds nothing to PATH) is checked directly; a bare name is
+        // resolved the same way Process would resolve it.
+        if (is_file($binary)) {
+            return true;
+        }
+
+        return (new ExecutableFinder())->find($binary) !== null;
+    }
 
     public static function normalize(string $absolutePath): bool
     {

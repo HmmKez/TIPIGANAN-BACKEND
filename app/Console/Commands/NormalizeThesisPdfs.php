@@ -3,7 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Thesis;
-use App\Services\Pdf\WatermarkPdf;
+use App\Services\WatermarkService;
 use App\Support\PdfNormalizer;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
@@ -96,14 +96,11 @@ class NormalizeThesisPdfs extends Command
         return $failed === 0 ? self::SUCCESS : self::FAILURE;
     }
 
+    // Shares WatermarkService's own check rather than keeping a second copy —
+    // "can this be viewed" must mean exactly the same thing here as it does on
+    // the upload path and at read time.
     private function isFpdiReadable(string $path): bool
     {
-        try {
-            (new WatermarkPdf())->setSourceFile($path);
-
-            return true;
-        } catch (\Throwable $e) {
-            return false;
-        }
+        return (new WatermarkService())->canStamp($path);
     }
 }

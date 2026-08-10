@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
+use App\Services\WatermarkService;
 use App\Models\ReadingHistory;
 use App\Models\SignedUrlToken;
 use App\Models\Thesis;
@@ -14,10 +15,43 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use App\Jobs\ProcessThesisOcr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class ThesisController extends Controller
 {
+    // Normalizes a freshly-stored PDF and reports back whether a reader will
+    // actually be able to open it.
+    //
+    // Every view is watermarked on the fly, so a PDF the stamper can't parse
+    // is a thesis nobody can read — but the upload itself still succeeds by
+    // design (rejecting a file the staff member can't fix helps no one). The
+    // cost of that choice is that the failure would otherwise stay invisible
+    // until a reader hits it weeks later, so it is surfaced here instead.
+    //
+    // Returns null when all is well, or a message aimed at whoever can act on
+    // it: a missing qpdf is the administrator's problem, a file qpdf couldn't
+    // repair is the uploader's.
+    private function prepareForViewing(string $absolutePath): ?string
+    {
+        PdfNormalizer::normalize($absolutePath);
+
+        if ((new WatermarkService())->canStamp($absolutePath)) {
+            return null;
+        }
+
+        Log::warning('Uploaded PDF cannot be watermarked and will not open in the viewer.', [
+            'path'           => $absolutePath,
+            'qpdf_available' => PdfNormalizer::isAvailable(),
+        ]);
+
+        if (! PdfNormalizer::isAvailable()) {
+            return 'This file was saved, but it cannot be opened in the viewer yet: the PDF preparation tool (qpdf) is not installed on this server. Ask the administrator to install it, then run "php artisan theses:normalize-pdfs" — no re-upload is needed.';
+        }
+
+        return 'This file was saved, but readers will not be able to open it. It is most likely password-protected or damaged. Try opening it and re-saving it as a new PDF, then replace the file here.';
+    }
+
     // Syncs a thesis to the search index without letting a Meilisearch
     // outage (e.g. cURL error 7, connection refused) fail the request —
     // the database write already succeeded, so search sync is best-effort.
@@ -320,10 +354,9 @@ class ThesisController extends Controller
         $pdfPath = $request->file('pdf_file')
             ->store('theses', 'local');
 
-        // Rewrite into an FPDI-compatible structure if needed (see
-        // PdfNormalizer) — best-effort, never blocks the upload if qpdf
-        // isn't installed on this machine yet.
-        PdfNormalizer::normalize(Storage::disk('local')->path($pdfPath));
+        // Rewrite into an FPDI-readable structure and find out whether a reader
+        // will actually be able to open it. Never blocks the upload.
+        $viewWarning = $this->prepareForViewing(Storage::disk('local')->path($pdfPath));
 
         // Fixity: record a SHA-256 of the stored file so silent
         // corruption/tampering can be detected later (theses:verify-checksums).
@@ -371,6 +404,11 @@ class ThesisController extends Controller
             'description' => "{$request->user()->name} uploaded thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
+
+        // Added as an attribute rather than wrapping the response in a new
+        // envelope, so existing callers reading the thesis fields directly
+        // keep working. Null when the file is fine.
+        $thesis->setAttribute('view_warning', $viewWarning);
 
         return response()->json($thesis, 201);
     }
@@ -440,10 +478,9 @@ class ThesisController extends Controller
         $oldPath = $thesis->file_path;
         $newPath = $request->file('pdf_file')->store('theses', 'local');
 
-        // Rewrite into an FPDI-compatible structure if needed (see
-        // PdfNormalizer) — best-effort, never blocks the replace if qpdf
-        // isn't installed on this machine yet.
-        PdfNormalizer::normalize(Storage::disk('local')->path($newPath));
+        // Same preparation + viewability check as store(); a replace can just
+        // as easily introduce a file the viewer cannot open.
+        $viewWarning = $this->prepareForViewing(Storage::disk('local')->path($newPath));
 
         // Fixity hash of the new file (see store()).
         $newChecksum = hash_file('sha256', Storage::disk('local')->path($newPath));
@@ -506,8 +543,9 @@ class ThesisController extends Controller
         ThesisFilePurger::sweepIfDue();
 
         return response()->json([
-            'thesis'   => $thesis->fresh(),
-            'detected' => $detected,
+            'thesis'       => $thesis->fresh(),
+            'detected'     => $detected,
+            'view_warning' => $viewWarning,
         ]);
     }
 
