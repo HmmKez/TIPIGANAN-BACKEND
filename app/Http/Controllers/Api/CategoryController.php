@@ -84,7 +84,7 @@ class CategoryController extends Controller
             'action'      => 'create_category',
             'target_type' => 'category',
             'target_id'   => $category->id,
-            'description' => "{$request->user()->name} created category {$category->name}",
+            'description' => "{$request->user()->display_name} created category {$category->name}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -112,7 +112,7 @@ class CategoryController extends Controller
             'action'      => 'update_category',
             'target_type' => 'category',
             'target_id'   => $category->id,
-            'description' => "{$request->user()->name} updated category {$category->name}",
+            'description' => "{$request->user()->display_name} updated category {$category->name}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -143,7 +143,7 @@ class CategoryController extends Controller
             'action'      => 'update_category',
             'target_type' => 'category',
             'target_id'   => $category->id,
-            'description' => "{$request->user()->name} updated the cover image for category {$category->name}",
+            'description' => "{$request->user()->display_name} updated the cover image for category {$category->name}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -167,7 +167,7 @@ class CategoryController extends Controller
             'action'      => 'delete_category',
             'target_type' => 'category',
             'target_id'   => $category->id,
-            'description' => "{$request->user()->name} deleted category {$category->name}",
+            'description' => "{$request->user()->display_name} deleted category {$category->name}",
             'ip_address'  => $request->ip(),
         ]);
 

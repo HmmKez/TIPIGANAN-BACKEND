@@ -38,18 +38,28 @@ class UserController extends Controller
     public function store(Request $request)
     {
         $request->validate([
-            'name'     => 'required|string|max:255',
-            'email'    => 'required|email|unique:users,email',
-            'password' => ['required', 'string', Password::default()],
-            'role'     => 'required|in:staff,super_admin',
+            // Staff and Super Admins are school employees, so they have an ID
+            // number too and log in with it exactly like everyone else.
+            'id_number' => 'required|digits:5|unique:users,id_number',
+            // Optional, unlike registration: an admin creating a colleague's
+            // account usually knows their name, and there is no reason to
+            // discard it while waiting for the school API.
+            'name'      => 'nullable|string|max:255',
+            'email'     => 'required|email|unique:users,email',
+            'password'  => ['required', 'string', Password::default()],
+            'role'      => 'required|in:staff,super_admin',
+        ], [
+            'id_number.digits' => 'The ID number must be exactly 5 digits.',
+            'id_number.unique' => 'An account already exists for that ID number.',
         ]);
 
         $user = User::create([
-            'name'     => $request->name,
-            'email'    => $request->email,
-            'password' => Hash::make($request->password),
-            'role'     => $request->role,
-            'status'   => 'active',
+            'id_number' => (string) $request->id_number,
+            'name'      => $request->name,
+            'email'     => $request->email,
+            'password'  => Hash::make($request->password),
+            'role'      => $request->role,
+            'status'    => 'active',
         ]);
 
         $user->assignRole($request->role);
@@ -59,7 +69,7 @@ class UserController extends Controller
             'action'      => 'create_user',
             'target_type' => 'user',
             'target_id'   => $user->id,
-            'description' => "{$request->user()->name} created account for {$user->name} as {$user->role}",
+            'description' => "{$request->user()->display_name} created account for {$user->display_name} as {$user->role}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -89,7 +99,7 @@ class UserController extends Controller
             'action'      => 'update_user',
             'target_type' => 'user',
             'target_id'   => $user->id,
-            'description' => "{$request->user()->name} updated account for {$user->name}",
+            'description' => "{$request->user()->display_name} updated account for {$user->display_name}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -121,7 +131,7 @@ class UserController extends Controller
             'action'      => 'delete_user',
             'target_type' => 'user',
             'target_id'   => $user->id,
-            'description' => "{$request->user()->name} deleted account for {$user->name}",
+            'description' => "{$request->user()->display_name} deleted account for {$user->display_name}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -145,7 +155,7 @@ class UserController extends Controller
             'action'      => 'activate_user',
             'target_type' => 'user',
             'target_id'   => $user->id,
-            'description' => "{$request->user()->name} activated account for {$user->name}",
+            'description' => "{$request->user()->display_name} activated account for {$user->display_name}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -170,7 +180,7 @@ class UserController extends Controller
             'action'      => 'deactivate_user',
             'target_type' => 'user',
             'target_id'   => $user->id,
-            'description' => "{$request->user()->name} deactivated account for {$user->name}",
+            'description' => "{$request->user()->display_name} deactivated account for {$user->display_name}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -192,7 +202,7 @@ class UserController extends Controller
             'action'      => 'reset_password',
             'target_type' => 'user',
             'target_id'   => $user->id,
-            'description' => "{$request->user()->name} reset password for {$user->name}",
+            'description' => "{$request->user()->display_name} reset password for {$user->display_name}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -227,12 +237,12 @@ class UserController extends Controller
             'action'      => 'grant_permission',
             'target_type' => 'user',
             'target_id'   => $user->id,
-            'description' => "{$request->user()->name} granted '{$request->permission}' to {$user->name}",
+            'description' => "{$request->user()->display_name} granted '{$request->permission}' to {$user->display_name}",
             'ip_address'  => $request->ip(),
         ]);
 
         return response()->json([
-            'message'     => "Permission '{$request->permission}' granted to {$user->name}.",
+            'message'     => "Permission '{$request->permission}' granted to {$user->display_name}.",
             'permissions' => $user->getAllPermissions()->pluck('name'),
         ]);
     }
@@ -252,12 +262,12 @@ class UserController extends Controller
             'action'      => 'revoke_permission',
             'target_type' => 'user',
             'target_id'   => $user->id,
-            'description' => "{$request->user()->name} revoked '{$request->permission}' from {$user->name}",
+            'description' => "{$request->user()->display_name} revoked '{$request->permission}' from {$user->display_name}",
             'ip_address'  => $request->ip(),
         ]);
 
         return response()->json([
-            'message'     => "Permission '{$request->permission}' revoked from {$user->name}.",
+            'message'     => "Permission '{$request->permission}' revoked from {$user->display_name}.",
             'permissions' => $user->getAllPermissions()->pluck('name'),
         ]);
     }

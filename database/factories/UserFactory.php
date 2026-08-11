@@ -26,6 +26,11 @@ class UserFactory extends Factory
     {
         return [
             'name' => fake()->name(),
+            // Unique 5-digit school ID. numberBetween would let a value below
+            // 10000 through and produce a 4-digit string, which then fails the
+            // digits:5 rule the real endpoints enforce - so the range starts at
+            // 10000 to keep test data shaped like production data.
+            'id_number' => (string) fake()->unique()->numberBetween(10000, 99999),
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),

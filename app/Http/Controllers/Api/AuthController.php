@@ -20,32 +20,42 @@ class AuthController extends Controller
     private const MAX_LOGIN_ATTEMPTS = 5;
 
     /**
-     * Brute-force key for one account as seen from one IP. Scoping to the email
-     * as well as the IP means a shared campus IP can't lock everyone out, and a
-     * distributed attack on one account is still counted together.
+     * Brute-force key for one account as seen from one IP, keyed on the ID
+     * number now that it is the login credential. Scoping to account|ip rather
+     * than ip alone is what stops one person fumbling their password from
+     * locking out everyone else on a shared campus connection, while a
+     * distributed attack on a single account is still counted together.
      */
     private function loginThrottleKey(Request $request): string
     {
         return 'login:'.Str::transliterate(
-            Str::lower((string) $request->input('email')).'|'.$request->ip()
+            Str::lower((string) $request->input('id_number')).'|'.$request->ip()
         );
     }
 
     public function register(Request $request)
     {
         $request->validate([
-            'name'     => 'required|string|max:255',
-            'email'    => 'required|email|unique:users,email',
-            'password' => ['required', 'string', 'confirmed', Password::default()],
-            'role'     => 'required|in:student,teacher',
+            // The school's 5-digit student/teacher ID. `digits:5` keeps a
+            // leading-zero ID like "00123" valid, which a numeric rule such as
+            // between:10000,99999 would wrongly reject.
+            'id_number' => 'required|digits:5|unique:users,id_number',
+            'email'     => 'required|email|unique:users,email',
+            'password'  => ['required', 'string', 'confirmed', Password::default()],
+            'role'      => 'required|in:student,teacher',
+        ], [
+            'id_number.digits' => 'Your ID number must be exactly 5 digits.',
+            'id_number.unique' => 'An account already exists for that ID number.',
         ]);
 
+        // No name is collected. It comes from the school's API, keyed on the ID
+        // number; until then display falls back to the ID (User::display_name).
         $user = User::create([
-            'name'     => $request->name,
-            'email'    => $request->email,
-            'password' => Hash::make($request->password),
-            'role'     => $request->role,
-            'status'   => 'active',
+            'id_number' => (string) $request->id_number,
+            'email'     => $request->email,
+            'password'  => Hash::make($request->password),
+            'role'      => $request->role,
+            'status'    => 'active',
         ]);
 
         $user->assignRole($request->role);
@@ -55,7 +65,7 @@ class AuthController extends Controller
             'action'      => 'register',
             'target_type' => 'user',
             'target_id'   => $user->id,
-            'description' => "{$user->name} registered as {$user->role}",
+            'description' => "{$user->display_name} registered as {$user->role}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -72,8 +82,8 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $request->validate([
-            'email'    => 'required|email',
-            'password' => 'required|string',
+            'id_number' => 'required|digits:5',
+            'password'  => 'required|string',
         ]);
 
         // Only FAILED attempts are counted (and the counter is cleared on success
@@ -84,18 +94,23 @@ class AuthController extends Controller
         if (SafeCache::tooManyAttempts($throttleKey, self::MAX_LOGIN_ATTEMPTS)) {
             $seconds = SafeCache::availableIn($throttleKey);
 
+            // Keyed on id_number so the frontend shows the error against the
+            // field the user actually typed into.
             throw ValidationException::withMessages([
-                'email' => ["Too many failed login attempts. Please try again in {$seconds} seconds."],
+                'id_number' => ["Too many failed login attempts. Please try again in {$seconds} seconds."],
             ])->status(429);
         }
 
-        $user = User::where('email', $request->email)->first();
+        $user = User::where('id_number', (string) $request->id_number)->first();
 
         if (! $user || ! Hash::check($request->password, $user->password)) {
             SafeCache::hit($throttleKey, 60);
 
+            // Deliberately the same message whether the ID exists or the
+            // password is wrong - saying "no such ID" would let anyone probe
+            // which student numbers have accounts.
             throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect.'],
+                'id_number' => ['The provided credentials are incorrect.'],
             ]);
         }
 
@@ -112,7 +127,7 @@ class AuthController extends Controller
             'action'      => 'login',
             'target_type' => 'user',
             'target_id'   => $user->id,
-            'description' => "{$user->name} logged in",
+            'description' => "{$user->display_name} logged in",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -133,7 +148,7 @@ class AuthController extends Controller
             'action'      => 'logout',
             'target_type' => 'user',
             'target_id'   => $request->user()->id,
-            'description' => "{$request->user()->name} logged out",
+            'description' => "{$request->user()->display_name} logged out",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -171,7 +186,7 @@ class AuthController extends Controller
             'action'      => 'change_password',
             'target_type' => 'user',
             'target_id'   => $request->user()->id,
-            'description' => "{$request->user()->name} changed their password",
+            'description' => "{$request->user()->display_name} changed their password",
             'ip_address'  => $request->ip(),
         ]);
 

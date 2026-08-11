@@ -32,7 +32,7 @@ class ThesisReportController extends Controller
             'action'      => 'report_thesis',
             'target_type' => 'thesis',
             'target_id'   => $thesis->id,
-            'description' => "{$request->user()->name} reported thesis: {$thesis->title}",
+            'description' => "{$request->user()->display_name} reported thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -67,7 +67,7 @@ class ThesisReportController extends Controller
             'action'      => 'resolve_thesis_report',
             'target_type' => 'thesis',
             'target_id'   => $report->thesis_id,
-            'description' => "{$request->user()->name} resolved a report on thesis #{$report->thesis_id}",
+            'description' => "{$request->user()->display_name} resolved a report on thesis #{$report->thesis_id}",
             'ip_address'  => $request->ip(),
         ]);
 

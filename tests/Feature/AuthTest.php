@@ -15,7 +15,7 @@ class AuthTest extends TestCase
     private function registerPayload(array $overrides = []): array
     {
         return array_merge([
-            'name'                  => 'Test Student',
+            'id_number'             => '54321',
             'email'                 => 'student@example.com',
             'password'              => 'Password123',
             'password_confirmation' => 'Password123',
@@ -47,12 +47,13 @@ class AuthTest extends TestCase
     public function test_login_returns_a_token_with_correct_credentials(): void
     {
         User::factory()->create([
+            'id_number' => '11111',
             'email'    => 'a@example.com',
             'password' => Hash::make('Password123'),
             'role'     => 'student',
         ]);
 
-        $this->postJson('/api/auth/login', ['email' => 'a@example.com', 'password' => 'Password123'])
+        $this->postJson('/api/auth/login', ['id_number' => '11111', 'password' => 'Password123'])
             ->assertOk()
             ->assertJsonStructure(['token']);
     }
@@ -60,18 +61,20 @@ class AuthTest extends TestCase
     public function test_login_fails_with_a_wrong_password(): void
     {
         User::factory()->create([
+            'id_number' => '22222',
             'email'    => 'b@example.com',
             'password' => Hash::make('Password123'),
             'role'     => 'student',
         ]);
 
-        $this->postJson('/api/auth/login', ['email' => 'b@example.com', 'password' => 'WrongPass9'])
+        $this->postJson('/api/auth/login', ['id_number' => '22222', 'password' => 'WrongPass9'])
             ->assertStatus(422);
     }
 
     public function test_login_is_rate_limited_after_five_failed_attempts(): void
     {
         User::factory()->create([
+            'id_number' => '33333',
             'email'    => 'c@example.com',
             'password' => Hash::make('Password123'),
             'role'     => 'student',
@@ -81,11 +84,11 @@ class AuthTest extends TestCase
         // rejected). Asserting only that the sixth is 429 would pass even if the
         // limiter blocked everything from the first request onward.
         for ($i = 0; $i < 5; $i++) {
-            $this->postJson('/api/auth/login', ['email' => 'c@example.com', 'password' => 'nope'])
+            $this->postJson('/api/auth/login', ['id_number' => '33333', 'password' => 'nope'])
                 ->assertStatus(422);
         }
 
-        $this->postJson('/api/auth/login', ['email' => 'c@example.com', 'password' => 'nope'])
+        $this->postJson('/api/auth/login', ['id_number' => '33333', 'password' => 'nope'])
             ->assertStatus(429);
     }
 
@@ -96,6 +99,7 @@ class AuthTest extends TestCase
         // alone — the route is not part of the key — so both shared ONE counter,
         // and ordinary browsing pushed it past 5 and 429'd the first login.
         User::factory()->create([
+            'id_number' => '44444',
             'email'    => 'd@example.com',
             'password' => Hash::make('Password123'),
             'role'     => 'student',
@@ -105,7 +109,7 @@ class AuthTest extends TestCase
             $this->getJson('/api/theses')->assertOk();
         }
 
-        $this->postJson('/api/auth/login', ['email' => 'd@example.com', 'password' => 'Password123'])
+        $this->postJson('/api/auth/login', ['id_number' => '44444', 'password' => 'Password123'])
             ->assertOk()
             ->assertJsonStructure(['token']);
     }
@@ -113,6 +117,7 @@ class AuthTest extends TestCase
     public function test_a_successful_login_clears_the_failed_attempt_counter(): void
     {
         User::factory()->create([
+            'id_number' => '55555',
             'email'    => 'e@example.com',
             'password' => Hash::make('Password123'),
             'role'     => 'student',
@@ -122,45 +127,47 @@ class AuthTest extends TestCase
         // counted and success resets them, so the total never reaches the limit
         // and the user is never locked out of an account they can log into.
         for ($i = 0; $i < 3; $i++) {
-            $this->postJson('/api/auth/login', ['email' => 'e@example.com', 'password' => 'nope'])
+            $this->postJson('/api/auth/login', ['id_number' => '55555', 'password' => 'nope'])
                 ->assertStatus(422);
         }
 
-        $this->postJson('/api/auth/login', ['email' => 'e@example.com', 'password' => 'Password123'])
+        $this->postJson('/api/auth/login', ['id_number' => '55555', 'password' => 'Password123'])
             ->assertOk();
 
         for ($i = 0; $i < 3; $i++) {
-            $this->postJson('/api/auth/login', ['email' => 'e@example.com', 'password' => 'nope'])
+            $this->postJson('/api/auth/login', ['id_number' => '55555', 'password' => 'nope'])
                 ->assertStatus(422);
         }
 
-        $this->postJson('/api/auth/login', ['email' => 'e@example.com', 'password' => 'Password123'])
+        $this->postJson('/api/auth/login', ['id_number' => '55555', 'password' => 'Password123'])
             ->assertOk();
     }
 
     public function test_locking_one_account_does_not_lock_another(): void
     {
         User::factory()->create([
+            'id_number' => '66666',
             'email'    => 'victim@example.com',
             'password' => Hash::make('Password123'),
             'role'     => 'student',
         ]);
         User::factory()->create([
+            'id_number' => '77777',
             'email'    => 'bystander@example.com',
             'password' => Hash::make('Password123'),
             'role'     => 'student',
         ]);
 
         for ($i = 0; $i < 6; $i++) {
-            $this->postJson('/api/auth/login', ['email' => 'victim@example.com', 'password' => 'nope']);
+            $this->postJson('/api/auth/login', ['id_number' => '66666', 'password' => 'nope']);
         }
 
-        $this->postJson('/api/auth/login', ['email' => 'victim@example.com', 'password' => 'Password123'])
+        $this->postJson('/api/auth/login', ['id_number' => '66666', 'password' => 'Password123'])
             ->assertStatus(429);
 
         // Same IP, different account — must be unaffected, otherwise one bad
         // actor on a shared campus network could lock out the whole school.
-        $this->postJson('/api/auth/login', ['email' => 'bystander@example.com', 'password' => 'Password123'])
+        $this->postJson('/api/auth/login', ['id_number' => '77777', 'password' => 'Password123'])
             ->assertOk();
     }
 
@@ -200,21 +207,103 @@ class AuthTest extends TestCase
 
         try {
             User::factory()->create([
-                'email'    => 'scoped@example.com',
+                'id_number' => '88888',
+            'email'    => 'scoped@example.com',
                 'password' => Hash::make('Password123'),
                 'role'     => 'student',
             ]);
 
             for ($i = 0; $i < 6; $i++) {
-                $this->postJson('/api/auth/login', ['email' => 'scoped@example.com', 'password' => 'nope']);
+                $this->postJson('/api/auth/login', ['id_number' => '88888', 'password' => 'nope']);
             }
 
-            $this->postJson('/api/auth/login', ['email' => 'scoped@example.com', 'password' => 'Password123'])
+            $this->postJson('/api/auth/login', ['id_number' => '88888', 'password' => 'Password123'])
                 ->assertStatus(429);
         } finally {
             foreach ($created as $flag) {
                 @unlink($flag);
             }
         }
+    }
+
+    public function test_registration_does_not_ask_for_a_name(): void
+    {
+        Role::findOrCreate('student');
+
+        // The whole point of the change: an account is created from an ID
+        // number alone, because the school's API supplies the name later.
+        $this->postJson('/api/auth/register', $this->registerPayload())->assertCreated();
+
+        $user = User::where('id_number', '54321')->first();
+
+        $this->assertNotNull($user);
+        $this->assertNull($user->name, 'Registration must not invent or require a name.');
+    }
+
+    public function test_a_user_with_no_name_still_has_something_to_display(): void
+    {
+        // This is the one that protects the watermark. Every page of every PDF
+        // is stamped with the reader's identity so a leak can be traced; if a
+        // nameless account rendered blank there, the stamp would still LOOK
+        // present while identifying nobody.
+        $user = User::factory()->create(['id_number' => '31337', 'name' => null]);
+
+        $this->assertSame('31337', $user->display_name);
+        $this->assertSame('31337', $user->fresh()->toArray()['display_name'],
+            'display_name must be serialised to the frontend, not just readable in PHP.');
+    }
+
+    public function test_an_id_number_cannot_be_registered_twice(): void
+    {
+        Role::findOrCreate('student');
+
+        $this->postJson('/api/auth/register', $this->registerPayload())->assertCreated();
+
+        // Same ID, different email — must still be refused, or two people would
+        // share the one credential everything else is keyed on.
+        $this->postJson('/api/auth/register', $this->registerPayload([
+            'email' => 'someone.else@example.com',
+        ]))->assertStatus(422)->assertJsonValidationErrors('id_number');
+    }
+
+    public function test_an_id_number_must_be_exactly_five_digits(): void
+    {
+        Role::findOrCreate('student');
+
+        foreach (['1234', '123456', 'abcde', ''] as $bad) {
+            $this->postJson('/api/auth/register', $this->registerPayload(['id_number' => $bad]))
+                ->assertStatus(422)
+                ->assertJsonValidationErrors('id_number');
+        }
+    }
+
+    public function test_a_leading_zero_in_an_id_number_survives(): void
+    {
+        Role::findOrCreate('student');
+
+        // "00123" is a legitimate 5-digit school ID. Stored as an integer it
+        // would silently become 123 and the person could never log in again.
+        $this->postJson('/api/auth/register', $this->registerPayload(['id_number' => '00123']))
+            ->assertCreated();
+
+        $this->assertDatabaseHas('users', ['id_number' => '00123']);
+
+        $this->postJson('/api/auth/login', ['id_number' => '00123', 'password' => 'Password123'])
+            ->assertOk()
+            ->assertJsonStructure(['token']);
+    }
+
+    public function test_logging_in_with_an_email_no_longer_works(): void
+    {
+        User::factory()->create([
+            'id_number' => '24680',
+            'email'     => 'legacy@example.com',
+            'password'  => Hash::make('Password123'),
+            'role'      => 'student',
+        ]);
+
+        $this->postJson('/api/auth/login', ['email' => 'legacy@example.com', 'password' => 'Password123'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('id_number');
     }
 }

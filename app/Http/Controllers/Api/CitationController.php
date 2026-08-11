@@ -90,7 +90,7 @@ class CitationController extends Controller
             'action'      => 'edit_citation',
             'target_type' => 'thesis',
             'target_id'   => $thesisId,
-            'description' => "{$request->user()->name} edited the {$citation->format_type} citation for thesis #{$thesisId}",
+            'description' => "{$request->user()->display_name} edited the {$citation->format_type} citation for thesis #{$thesisId}",
             'ip_address'  => $request->ip(),
         ]);
 

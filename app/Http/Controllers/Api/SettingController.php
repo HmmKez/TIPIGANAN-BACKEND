@@ -59,7 +59,7 @@ class SettingController extends Controller
             'action'      => 'update_active_term',
             'target_type' => 'setting',
             'target_id'   => null,
-            'description' => "{$request->user()->name} changed the active term from \"{$previous['label']}\" to \"{$term['label']}\"",
+            'description' => "{$request->user()->display_name} changed the active term from \"{$previous['label']}\" to \"{$term['label']}\"",
             'ip_address'  => $request->ip(),
         ]);
 

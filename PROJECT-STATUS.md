@@ -54,6 +54,7 @@ They must be on the **`dev`** branch (not `main`). `git pull`, then, **in this o
 - `add_metadata_to_audit_logs_table` — structured search terms. **Also backfills existing rows**, so it is safe (and necessary) to run against a populated database.
 - `add_indexes_to_audit_logs_table` — `(created_at)`, `(action, created_at)`, `(user_id, created_at)`. On a large `audit_logs` this one takes a moment.
 - `rename_favorites_table_to_bookmarks` — renames the `favorites` table to `bookmarks`. Reversible, keeps every row. **Teammates must run `php artisan migrate` or bookmarking will error with "table not found".**
+- `add_id_number_to_users_table` — adds the unique 5-digit `users.id_number` and makes `name` nullable. **Backfills every existing account** from 10001 upward before adding the unique index, so nobody is left without a login credential. **After migrating, run `php artisan db:seed --class=UserSeeder`** to get the 9000x test accounts. ⚠️ **Login is now by ID number, not email** — teammates signing in with an email will get "The id number field is required."
 - `add_code_to_categories_table` — the short category code (CAST, CABM-B, IP). **Backfills** a code for every existing category and then adds the unique index, so it is safe on a populated DB. If a teammate's install has categories whose derived codes would collide, the migration fails loudly rather than landing duplicates — fix the names and re-run.
 
 **`.env` keys:**
@@ -795,6 +796,23 @@ The column is now a **grid whose label row is a fixed 18px**, so every plotting 
 
 **Verified** on the live staff dashboard: 5 bars, **1 distinct baseline** (previously one per label height), uniform 18px labels, codes on the axis with full names in the tooltip. Report tests pass.
 
+### Accounts are identified by a 5-digit school ID number, not a name
+User is connecting to the school's own system by API: the student/teacher **ID number** is the key that will return a person's name and details, which makes asking for a name at registration redundant. Decisions taken with the user before building: **log in with the ID number** (not email), **still collect an email** at registration (a real contact while the school API doesn't exist yet), and **show the ID number wherever a name would appear** until real names arrive.
+
+- **`users.id_number`** — `CHAR(5)`, unique. Deliberately not an integer: `00123` is a valid 5-digit ID to a school office, and any numeric column stores it as `123` and locks that person out permanently. There is a test for exactly that.
+- **`users.name` is now nullable.** Registration no longer collects it at all; `UserController::store()` (admin-created staff) keeps it as *optional*, since an admin creating a colleague's account usually knows their name and there's no reason to discard it.
+- **`User::display_name`** — accessor returning `name ?: id_number`, appended to every serialised user. **This is a security control, not cosmetics:** every page of every PDF is stamped with the reader's identity so a leak is traceable, and a null name would have stamped `null · email` — a watermark that still *looks* present while identifying nobody. All ~30 audit-log descriptions now use it too, or they'd read " logged in".
+- **Login is by ID number**, including the brute-force key (`login:{id}|{ip}`), and the "credentials are incorrect" message is deliberately identical whether the ID exists or the password is wrong — otherwise anyone could probe which student numbers have accounts.
+- **Frontend**: login and registration ask for the ID; both inputs are `type="text"` with `inputMode="numeric"`, because `type="number"` silently strips a leading zero. New shared `utils/userLabel.js` is the single place that decides what to print for a person, with fallbacks covering a user object cached in localStorage before this shipped.
+
+**A destructive mistake I made, and the fix.** The migration backfilled existing accounts sequentially from `10001`, and the first seeder keyed on `id_number` — so seeding "student2"/"teacher2" onto `10005`/`10006` **overwrote two real accounts**, changing one user's email and flipping their role from student to teacher. Caught immediately on the verification listing and restored from the pre-change values. The seeder now (a) matches on **email**, the identifier those accounts have had since before ID numbers existed, and (b) uses a reserved **9xxxx** block that the 10001+ backfill can never reach. The general lesson is recorded because it will recur: *a seeder that matches on a backfilled column will collide with whatever real data the backfill happened to assign.*
+
+**Dead fields found and removed while rebuilding the register form.** It collected `student_id` **and** `department` — and `register()` only ever validated name/email/password/role, so Laravel silently discarded both. Department was a **required** field whose value never left the browser. `student_id` is now properly replaced by `id_number`; department is gone (it would need a real column and a decision about where the list comes from — the school API most likely).
+
+**Dummy accounts** (`UserSeeder`, password `password` for all): `90001` super admin, `90002` staff, `90003` student, `90004` teacher, plus `90005`/`90006` as a second student and teacher for checking account-to-account isolation. The last two are seeded **with no name on purpose**, so anything that still assumes a name exists surfaces during testing rather than after the school API is wired up.
+
+**Tests 84 → 90**, and the new ones pin the rules that would be expensive to get wrong: registration does not require a name, a nameless user still has a `display_name` *and* it is serialised to the frontend, an ID cannot be registered twice, an ID must be exactly 5 digits, **a leading zero survives a round trip through the database and login**, and email-based login is now refused. **Verified in a real browser** end-to-end: signed in with ID `90003`, registered a fresh account with no name, and confirmed the sidebar shows `47478`, the avatar `47`, and the watermark would stamp `47478 · email` rather than blank.
+
 ### One feature, two names: `favorites` → `bookmarks` (table only), and a count that never rendered
 User asked for the bookmark/favorites naming to be made consistent, then — before committing to the full rename — asked how big the impact would be.
 
@@ -894,11 +912,22 @@ The free tier of `setasign/fpdi` cannot parse PDF 1.5+ **object streams / cross-
 
 ## 5. Reference
 
-**Test accounts** (all password: `password`): `superadmin@tipiganan.com`, `staff@tipiganan.com`, `student@tipiganan.com`, `teacher@tipiganan.com`
+**Test accounts** — sign in with the **ID number**, not the email. Password for all: `password`.
+
+| ID | Role | Email (contact only) |
+|---|---|---|
+| `90001` | Super Admin | superadmin@tipiganan.com |
+| `90002` | Staff | staff@tipiganan.com |
+| `90003` | Student | student@tipiganan.com |
+| `90004` | Teacher | teacher@tipiganan.com |
+| `90005` | Student — **no name set** | student2@tipiganan.com |
+| `90006` | Teacher — **no name set** | teacher2@tipiganan.com |
+
+The last two deliberately have no name, matching what a real registration now produces — use them to catch anything still assuming a name exists. Re-create them all with `php artisan db:seed --class=UserSeeder`.
 
 **Every custom artisan command** (all seven — the scheduled ones fire on their own only once the deploy cron exists, see §7):
 ```bash
-php artisan test                              # full backend test suite — 84 tests, all passing
+php artisan test                              # full backend test suite — 90 tests, all passing
 
 # Search index
 php artisan scout:sync-index-settings         # push Meilisearch filterable-attribute config
@@ -944,8 +973,8 @@ cd /c/Users/conch/meilisearch && ./meilisearch.exe --http-addr 127.0.0.1:7700 --
 Organized by capability area, describing **the system as it stands today** — not a chronological changelog like §3. This is the direct source for the "complete list of every functionality" PDF the user will request; when that request comes, read this section, cross-check against routes/pages for anything not yet logged here, then render it as a real PDF (see Known Issues #11).
 
 ### 6.1 Accounts & Authentication
-- Self-service registration for Student and Teacher accounts; Staff and Super Admin accounts can only be created by an existing Super Admin — no public signup for those two roles.
-- Email/password login issuing a bearer token valid for 7 days (configurable) before requiring re-login.
+- Self-service registration for Student and Teacher accounts using their school ID number and email — **no name is asked for**, since it comes from the school's records via that ID; anywhere a name would appear falls back to the ID number until then. Staff and Super Admin accounts can only be created by an existing Super Admin — no public signup for those two roles.
+- Sign-in is by **5-digit school ID number** and password, issuing a bearer token valid for 7 days (configurable) before requiring re-login. The ID number is the same identifier the school's own systems use, and is the key by which the school API will supply a person's real name and details.
 - Self-service password change from the account's own Profile; admin-assisted password reset for any account (Staff/Super Admin only) — by deliberate design there is no self-service "forgot password" email flow.
 - Password policy — minimum 8 characters, must include upper-case, lower-case, and a number — enforced identically everywhere a password is set (registration, self change, admin-created accounts, admin resets).
 - Login is protected against password brute-forcing: 5 **failed** attempts per minute locks that account (from that IP) with a live "try again in Ns" countdown. Only failures count and a successful login resets the counter, so normal use is never throttled. The auth endpoints also carry a 20/minute per-IP ceiling, and every other endpoint is rate-limited at 120 requests/minute as a general abuse/scraping guard.
@@ -1046,7 +1075,7 @@ Organized by capability area, describing **the system as it stands today** — n
 - **HTTPS enforced in production** (with reverse-proxy trust, so signed PDF-viewer URLs stay correct), and CORS locked to the configured frontend origin rather than any localhost.
 
 ### 6.15 Quality Assurance
-- Automated test suite (84 tests) covering the critical paths: authentication + password policy + login rate-limiting (including the browsing-must-not-consume-the-login-limit regression), role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users (including that displayed counts never advertise theses a user cannot open), Super-Admin-only editing of the active term and the landing hero image, the public landing payload (including a cache-serialization regression test that runs against a *serializing* cache store, since the suite's default in-memory store cannot reproduce it), the full file-replace → version-restore → checksum lifecycle, and PDF normalization (graceful degradation without qpdf, object-stream PDFs becoming FPDI-readable, a size guard pinning the `--qdf` decision, encrypted-PDF recovery, the assertion that a password-protected PDF is refused and left intact, and that an unviewable upload still succeeds but returns a warning naming the right cause). Run with `php artisan test`.
+- Automated test suite (90 tests) covering the critical paths: authentication + password policy + login rate-limiting (including the browsing-must-not-consume-the-login-limit regression), role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users (including that displayed counts never advertise theses a user cannot open), Super-Admin-only editing of the active term and the landing hero image, the public landing payload (including a cache-serialization regression test that runs against a *serializing* cache store, since the suite's default in-memory store cannot reproduce it), the full file-replace → version-restore → checksum lifecycle, and PDF normalization (graceful degradation without qpdf, object-stream PDFs becoming FPDI-readable, a size guard pinning the `--qdf` decision, encrypted-PDF recovery, the assertion that a password-protected PDF is refused and left intact, and that an unviewable upload still succeeds but returns a warning naming the right cause). Run with `php artisan test`.
 
 ---
 
@@ -1081,7 +1110,7 @@ From the deploy-readiness diagnostic. **Tier 1 = must-do before going live; Tier
 - [ ] Meilisearch + queue worker (if async) supervised (NSSM on Windows / systemd on Linux).
 
 ### Tier 3 — quality / repository completeness
-- [x] **Automated tests** — DONE: 84 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility + displayed counts, active-term settings, landing payload + hero upload + cache-serialization regression, file-versioning + checksum, PDF normalization + the `--qdf` size guard). Room to grow (search, reports, citations) but the critical paths are covered. They earned their keep: the suite is what pinned down the login-429 bug and the archived-theses miscount, and now guards against both returning.
+- [x] **Automated tests** — DONE: 90 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility + displayed counts, active-term settings, landing payload + hero upload + cache-serialization regression, file-versioning + checksum, PDF normalization + the `--qdf` size guard). Room to grow (search, reports, citations) but the critical paths are covered. They earned their keep: the suite is what pinned down the login-429 bug and the archived-theses miscount, and now guards against both returning.
 - [x] **Timezone** — DONE: `Asia/Manila`, env-driven (`APP_TIMEZONE`). REMAINING (deploy): the prod template already sets it — just confirm it's applied on the fresh DB before go-live.
 - [x] **Fixity/checksums (#12)** — DONE: SHA-256 per file + `theses:verify-checksums` (weekly). REMAINING (deploy): the weekly schedule fires via the same `schedule:run` cron as Tier 2.
 - [x] **Load-test PDF-viewing** — DONE (dev floor measured): ~34ms/stamp, ~7–9 req/s at OPcache-off/4-worker; see §3 for the full interpretation + prod extrapolation. REMAINING: re-run against the deployed FPM+OPcache server with a large scanned thesis to get the real production ceiling.
@@ -1264,7 +1293,7 @@ php artisan tinker --execute="echo App\Models\Thesis::count();"
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\dev-services.ps1 -Status   # services
-php artisan test                                                            # 84 tests
+php artisan test                                                            # 90 tests
 php artisan theses:normalize-pdfs --dry-run --with-trashed                  # any unviewable PDFs?
 php artisan theses:verify-checksums                                         # file integrity
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/api/categories

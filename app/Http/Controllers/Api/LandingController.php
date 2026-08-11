@@ -128,7 +128,7 @@ class LandingController extends Controller
             'action'      => 'update_landing_collections',
             'target_type' => 'setting',
             'target_id'   => null,
-            'description' => "{$request->user()->name} changed which collections are featured on the landing page (" . count($ids) . ' shown)',
+            'description' => "{$request->user()->display_name} changed which collections are featured on the landing page (" . count($ids) . ' shown)',
             'ip_address'  => $request->ip(),
         ]);
 
@@ -148,7 +148,7 @@ class LandingController extends Controller
             'action'      => 'reset_landing_collections',
             'target_type' => 'setting',
             'target_id'   => null,
-            'description' => "{$request->user()->name} reset the landing page to feature every collection",
+            'description' => "{$request->user()->display_name} reset the landing page to feature every collection",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -185,7 +185,7 @@ class LandingController extends Controller
             'action'      => 'update_landing_hero',
             'target_type' => 'setting',
             'target_id'   => null,
-            'description' => "{$request->user()->name} changed the landing page hero image",
+            'description' => "{$request->user()->display_name} changed the landing page hero image",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -217,7 +217,7 @@ class LandingController extends Controller
             'action'      => 'reset_landing_hero',
             'target_type' => 'setting',
             'target_id'   => null,
-            'description' => "{$request->user()->name} reset the landing page hero image to the default",
+            'description' => "{$request->user()->display_name} reset the landing page hero image to the default",
             'ip_address'  => $request->ip(),
         ]);
 

@@ -263,7 +263,7 @@ class ThesisController extends Controller
             'action'      => 'view_thesis',
             'target_type' => 'thesis',
             'target_id'   => $thesis->id,
-            'description' => "{$request->user()->name} opened thesis: {$thesis->title}",
+            'description' => "{$request->user()->display_name} opened thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -406,7 +406,7 @@ class ThesisController extends Controller
             'action'      => 'upload_thesis',
             'target_type' => 'thesis',
             'target_id'   => $thesis->id,
-            'description' => "{$request->user()->name} uploaded thesis: {$thesis->title}",
+            'description' => "{$request->user()->display_name} uploaded thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -460,7 +460,7 @@ class ThesisController extends Controller
             'action'      => 'edit_thesis',
             'target_type' => 'thesis',
             'target_id'   => $thesis->id,
-            'description' => "{$request->user()->name} edited thesis: {$thesis->title}",
+            'description' => "{$request->user()->display_name} edited thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -517,7 +517,7 @@ class ThesisController extends Controller
             'action'      => 'replace_thesis_file',
             'target_type' => 'thesis',
             'target_id'   => $thesis->id,
-            'description' => "{$request->user()->name} replaced the file for thesis: {$thesis->title}",
+            'description' => "{$request->user()->display_name} replaced the file for thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -679,7 +679,7 @@ class ThesisController extends Controller
             'action'      => 'restore_thesis_file',
             'target_type' => 'thesis',
             'target_id'   => $thesis->id,
-            'description' => "{$request->user()->name} restored a previous file version for thesis: {$thesis->title}",
+            'description' => "{$request->user()->display_name} restored a previous file version for thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -702,7 +702,7 @@ class ThesisController extends Controller
             'action'      => 'purge_thesis_file_version',
             'target_type' => 'thesis',
             'target_id'   => $id,
-            'description' => "{$request->user()->name} permanently deleted a superseded file version (thesis #{$id})",
+            'description' => "{$request->user()->display_name} permanently deleted a superseded file version (thesis #{$id})",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -722,7 +722,7 @@ class ThesisController extends Controller
             'action'      => 'archive_thesis',
             'target_type' => 'thesis',
             'target_id'   => $thesis->id,
-            'description' => "{$request->user()->name} archived thesis: {$thesis->title}",
+            'description' => "{$request->user()->display_name} archived thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -756,7 +756,7 @@ class ThesisController extends Controller
             'action'      => 'update_thesis_status',
             'target_type' => 'thesis',
             'target_id'   => $thesis->id,
-            'description' => "{$request->user()->name} {$actionLabel} thesis: {$thesis->title}",
+            'description' => "{$request->user()->display_name} {$actionLabel} thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -773,7 +773,7 @@ class ThesisController extends Controller
             'action'      => 'delete_thesis',
             'target_type' => 'thesis',
             'target_id'   => $thesis->id,
-            'description' => "{$request->user()->name} deleted thesis: {$thesis->title}",
+            'description' => "{$request->user()->display_name} deleted thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
 
@@ -801,7 +801,7 @@ class ThesisController extends Controller
             'action'      => 'download_thesis',
             'target_type' => 'thesis',
             'target_id'   => $thesis->id,
-            'description' => "{$request->user()->name} downloaded thesis: {$thesis->title}",
+            'description' => "{$request->user()->display_name} downloaded thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
 
