@@ -53,6 +53,7 @@ They must be on the **`dev`** branch (not `main`). `git pull`, then, **in this o
 - `create_settings_table` — the Super-Admin-editable Active Term, landing hero image, and featured collections all live here.
 - `add_metadata_to_audit_logs_table` — structured search terms. **Also backfills existing rows**, so it is safe (and necessary) to run against a populated database.
 - `add_indexes_to_audit_logs_table` — `(created_at)`, `(action, created_at)`, `(user_id, created_at)`. On a large `audit_logs` this one takes a moment.
+- `rename_favorites_table_to_bookmarks` — renames the `favorites` table to `bookmarks`. Reversible, keeps every row. **Teammates must run `php artisan migrate` or bookmarking will error with "table not found".**
 - `add_code_to_categories_table` — the short category code (CAST, CABM-B, IP). **Backfills** a code for every existing category and then adds the unique index, so it is safe on a populated DB. If a teammate's install has categories whose derived codes would collide, the migration fails loudly rather than landing duplicates — fix the names and re-run.
 
 **`.env` keys:**
@@ -794,6 +795,20 @@ The column is now a **grid whose label row is a fixed 18px**, so every plotting 
 
 **Verified** on the live staff dashboard: 5 bars, **1 distinct baseline** (previously one per label height), uniform 18px labels, codes on the axis with full names in the tooltip. Report tests pass.
 
+### One feature, two names: `favorites` → `bookmarks` (table only), and a count that never rendered
+User asked for the bookmark/favorites naming to be made consistent, then — before committing to the full rename — asked how big the impact would be.
+
+**The naming.** Every user-facing surface already said *Bookmark* (the button on a thesis, the page heading, the dashboard tile); only the **sidebar nav item** still said "Favorites", and `/favorites` rendered the same page under a second URL. Both fixed: the nav says Bookmarks, and `/favorites` now **redirects** to `/bookmarks` so old links still land somewhere real — the same treatment `/search` got. The two API messages in `FavoriteController` were reworded too (nothing reads their text; the frontend checks status codes and ignores the body).
+
+**The impact assessment, measured rather than guessed.** Backend: 8 files but only ~10 lines of substance. Frontend: 47 mentions across 8 files, nearly all internal variable names. Data: **10 rows**. Crucially, **nothing in the schema points AT the table** — it points out to `users` and `theses` — so there were no dependent constraints to rebuild. Three options were put to the user: leave it, rename the table only, or rename the table *and* the API. **The user chose the middle one**, which is the sweet spot: the table name is what appears in the capstone **data dictionary**, while `/api/favorites` is a contract between a Vercel-hosted frontend and a separately-deployed backend, where renaming means coordinating two deploys for something no user can see.
+
+- New migration renames the table (`Schema::rename`), guarded so it is safe on an already-renamed or fresh database. `Favorite` model keeps its class name and gains `protected $table = 'bookmarks'`. **Verified both directions**: 10 rows before, 10 after, rolled back to `favorites` with 10 rows, re-migrated to `bookmarks` with 10 — reversible with no data loss.
+- **📄 Documentation impact: the capstone doc's Data Dictionary Table 4.4.6 is now titled with a table name that no longer exists.** It must be renamed to *Bookmarks*, and the ER diagram with it.
+
+**The bug this uncovered — the same one as `views_count`, still live.** Browse cards read `t.favorites_count`, and **the backend never produced that field anywhere**. So the bookmark badge on every Browse card had *never once rendered*: the `!= null` guard turned a missing field into an invisible element rather than a visible error. Fixed by counting it in all three places a list is produced — `ThesisController::index()`, the Meilisearch path, and the MySQL fallback — under the name `bookmark_count`, matching what the thesis detail endpoint already returned instead of inventing a second spelling for one number. **Verified on all three paths live** (search returned `bookmark_count: 3`, matching the database), and in a browser: every card now shows both counts, e.g. *13 views / 3 bookmarks*.
+
+**Tests 81 → 84** (new `ThesisCountsTest`): the listing carries both counts with real values, search results carry them too, and bookmarking still works end-to-end against the renamed table (add → 409 on duplicate → list → remove). They assert `assertArrayHasKey`, **not** just the value, because the bug was an *absent* key and `null == 0` would let a value-only assertion pass straight over it. Confirmed to fail (2 of 3) against the un-fixed code.
+
 ### Browse had three filters built twice each (user spotted it)
 User, looking at Browse: *"there's a filter card on the left… then another filter by the search bar… and a sort button at the top right. is there too much filter here?"* Correct — and the count was worse than it looked.
 
@@ -881,7 +896,7 @@ The free tier of `setasign/fpdi` cannot parse PDF 1.5+ **object streams / cross-
 
 **Every custom artisan command** (all seven — the scheduled ones fire on their own only once the deploy cron exists, see §7):
 ```bash
-php artisan test                              # full backend test suite — 81 tests, all passing
+php artisan test                              # full backend test suite — 84 tests, all passing
 
 # Search index
 php artisan scout:sync-index-settings         # push Meilisearch filterable-attribute config
@@ -1029,7 +1044,7 @@ Organized by capability area, describing **the system as it stands today** — n
 - **HTTPS enforced in production** (with reverse-proxy trust, so signed PDF-viewer URLs stay correct), and CORS locked to the configured frontend origin rather than any localhost.
 
 ### 6.15 Quality Assurance
-- Automated test suite (81 tests) covering the critical paths: authentication + password policy + login rate-limiting (including the browsing-must-not-consume-the-login-limit regression), role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users (including that displayed counts never advertise theses a user cannot open), Super-Admin-only editing of the active term and the landing hero image, the public landing payload (including a cache-serialization regression test that runs against a *serializing* cache store, since the suite's default in-memory store cannot reproduce it), the full file-replace → version-restore → checksum lifecycle, and PDF normalization (graceful degradation without qpdf, object-stream PDFs becoming FPDI-readable, a size guard pinning the `--qdf` decision, encrypted-PDF recovery, the assertion that a password-protected PDF is refused and left intact, and that an unviewable upload still succeeds but returns a warning naming the right cause). Run with `php artisan test`.
+- Automated test suite (84 tests) covering the critical paths: authentication + password policy + login rate-limiting (including the browsing-must-not-consume-the-login-limit regression), role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users (including that displayed counts never advertise theses a user cannot open), Super-Admin-only editing of the active term and the landing hero image, the public landing payload (including a cache-serialization regression test that runs against a *serializing* cache store, since the suite's default in-memory store cannot reproduce it), the full file-replace → version-restore → checksum lifecycle, and PDF normalization (graceful degradation without qpdf, object-stream PDFs becoming FPDI-readable, a size guard pinning the `--qdf` decision, encrypted-PDF recovery, the assertion that a password-protected PDF is refused and left intact, and that an unviewable upload still succeeds but returns a warning naming the right cause). Run with `php artisan test`.
 
 ---
 
@@ -1064,7 +1079,7 @@ From the deploy-readiness diagnostic. **Tier 1 = must-do before going live; Tier
 - [ ] Meilisearch + queue worker (if async) supervised (NSSM on Windows / systemd on Linux).
 
 ### Tier 3 — quality / repository completeness
-- [x] **Automated tests** — DONE: 81 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility + displayed counts, active-term settings, landing payload + hero upload + cache-serialization regression, file-versioning + checksum, PDF normalization + the `--qdf` size guard). Room to grow (search, reports, citations) but the critical paths are covered. They earned their keep: the suite is what pinned down the login-429 bug and the archived-theses miscount, and now guards against both returning.
+- [x] **Automated tests** — DONE: 84 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility + displayed counts, active-term settings, landing payload + hero upload + cache-serialization regression, file-versioning + checksum, PDF normalization + the `--qdf` size guard). Room to grow (search, reports, citations) but the critical paths are covered. They earned their keep: the suite is what pinned down the login-429 bug and the archived-theses miscount, and now guards against both returning.
 - [x] **Timezone** — DONE: `Asia/Manila`, env-driven (`APP_TIMEZONE`). REMAINING (deploy): the prod template already sets it — just confirm it's applied on the fresh DB before go-live.
 - [x] **Fixity/checksums (#12)** — DONE: SHA-256 per file + `theses:verify-checksums` (weekly). REMAINING (deploy): the weekly schedule fires via the same `schedule:run` cron as Tier 2.
 - [x] **Load-test PDF-viewing** — DONE (dev floor measured): ~34ms/stamp, ~7–9 req/s at OPcache-off/4-worker; see §3 for the full interpretation + prod extrapolation. REMAINING: re-run against the deployed FPM+OPcache server with a large scanned thesis to get the real production ceiling.
@@ -1227,7 +1242,7 @@ php artisan tinker --execute="echo App\Models\Thesis::count();"
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\dev-services.ps1 -Status   # services
-php artisan test                                                            # 81 tests
+php artisan test                                                            # 84 tests
 php artisan theses:normalize-pdfs --dry-run --with-trashed                  # any unviewable PDFs?
 php artisan theses:verify-checksums                                         # file integrity
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/api/categories

@@ -52,7 +52,8 @@ class SearchService
             // department tag, its cover image and its icon — while the same
             // cards showed all three when browsing without a query, because
             // /theses does load the relation.
-            ->query(fn ($q) => $q->with('category')->withCount(['readingHistory as views_count']));
+            ->query(fn ($q) => $q->with('category')
+                ->withCount(['readingHistory as views_count', 'favorites as bookmark_count']));
 
         if (!empty($filters['category_id'])) {
             $builder->where('category_id', (int) $filters['category_id']);
@@ -98,7 +99,7 @@ class SearchService
         // whether the search engine happens to be up.
         $builder = Thesis::query()
             ->with('category')
-            ->withCount(['readingHistory as views_count'])
+            ->withCount(['readingHistory as views_count', 'favorites as bookmark_count'])
             ->whereIn('status', $statuses)
             ->where(function ($q) use ($query) {
                 $q->where('title',    'LIKE', "%{$query}%")

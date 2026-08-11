@@ -96,7 +96,12 @@ class ThesisController extends Controller
             // denormalized counter column was never added, so this counts
             // reading_history rows live instead (same source show() already
             // uses for its own view_count).
-            ->withCount(['readingHistory as views_count'])
+            // bookmark_count was MISSING and the omission was invisible: Browse
+            // renders its bookmark badge behind a `!= null` guard, so a field
+            // the API never sent simply hid the badge instead of erroring.
+            // Named to match show()'s existing bookmark_count rather than
+            // inventing a second spelling for one number.
+            ->withCount(['readingHistory as views_count', 'favorites as bookmark_count'])
             ->when($request->status,
                 fn($q) => $q->where('status', $request->status),
                 fn($q) => $q->whereIn('status', $defaultStatuses))
