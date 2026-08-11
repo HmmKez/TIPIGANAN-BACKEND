@@ -34,6 +34,16 @@
 - **Team**: Group 7 — Concha, Esto, Mendez, Miano
 - **Both repos are on `dev`, and everything is committed and pushed to `origin/dev`** (verified clean as of 2026-07-13 — 0 uncommitted files on both, local `HEAD` == `origin/dev`). This session took the backend `d06b362 → b717dc6` and the frontend `f327598 → 85f047f`.
 
+> **📄 Documents on the Desktop (`C:\Users\conch\Desktop\CAPSTONE\`), regenerated 2026-08-11:**
+> `TIPIGANAN-Team-Guide-Updated.pdf` (`guide:generate`), `TIPIGANAN-System-Blueprint.pdf`
+> (`docs:blueprint` — read live from the database schema), and
+> `TIPIGANAN-System-Functionalities.pdf` (`docs:features`). All three are generated — never edit
+> the PDF, edit its Blade template and re-run the command.
+> The capstone write-up is the exception: it is authored prose and cannot be regenerated. Its
+> review copy is **`CAPSTONE-3 (1) - REVIEWED-v3.docx` — 21 highlighted findings with comments.**
+> Earlier `- REVIEWED.docx` (16) and `- REVIEWED-FINAL.docx` (17) are superseded and can be deleted;
+> `CAPSTONE-3 (1).docx` is the untouched original.
+>
 > **➡ To install, run, or restart anything, go to §8 "Setup & Running the System".** It has the full dependency list with versions, first-time setup from a clean clone, the one-command service starter (`scripts\dev-services.ps1`), how to make Meilisearch/Redis/MySQL start and stay started on their own, and a symptom-to-cause troubleshooting table.
 
 ### Teammates pulling this — what they actually need
@@ -814,6 +824,20 @@ User is connecting to the school's own system by API: the student/teacher **ID n
 **Dummy accounts** (`UserSeeder`, password `password` for all): `90001` super admin, `90002` staff, `90003` student, `90004` teacher, plus `90005`/`90006` as a second student and teacher for checking account-to-account isolation. The last two are seeded **with no name on purpose**, so anything that still assumes a name exists surfaces during testing rather than after the school API is wired up.
 
 **Tests 84 → 90**, and the new ones pin the rules that would be expensive to get wrong: registration does not require a name, a nameless user still has a `display_name` *and* it is serialised to the frontend, an ID cannot be registered twice, an ID must be exactly 5 digits, **a leading zero survives a round trip through the database and login**, and email-based login is now refused. **Verified in a real browser** end-to-end: signed in with ID `90003`, registered a fresh account with no name, and confirmed the sidebar shows `47478`, the avatar `47`, and the watermark would stamp `47478 · email` rather than blank.
+
+### Named action menus, a promotion confirmation, and the "null" a nameless account showed
+User: icon-only action buttons are confusing when you have to hover to learn what they do — and separately, promoting to Staff or Super Admin should ask first. Both options were shown as ASCII mock-ups before building, since the user said they might change their mind on seeing it.
+
+**Row actions are now named.** Every management table had bare icons whose meaning was discoverable only via a hover tooltip — which touch and keyboard users never get at all, and which even a mouse user has to hover several times to decode. Collection Management was the worst: `user-lock` / `unlock` / `archive` / `box-open` are four *different concepts* rendered as four similar glyphs. Each row now has one **Actions ▾** button opening a menu of named items, with destructive actions below a divider and in red. Labels name the concept, not the glyph, and Restrict/Archive carry tooltips saying **who can still see the item** — something an icon cannot convey.
+- Applied to **Collection Management, Category Management, User Management and Reported Items**. **Audit Logs deliberately kept a plain button**, relabelled "Details": it has a single action, and wrapping one item in a menu adds a click while hiding it behind a second label.
+- Extracted as a shared **`components/RowActions.jsx`** rather than copied per page — this markup, its positioning maths and its dismiss handling were about to exist in four places, and the previous helper duplicated across pages (`initials`) had been fixed in one copy while staying broken in the other two. Menus are `position: fixed` anchored to the button's own rect (a menu inside a table cell gets clipped), flip above when there's no room below, and close on Escape, outside click, or scroll.
+- Items the user can't use — changing your own role — are **shown disabled with a reason** rather than hidden, so it's clear the option exists and why it isn't available.
+
+**Promotions now confirm; demotions don't.** Choosing Staff or Super Admin goes to a confirmation screen naming the person and stating what the role grants; the first button says "Continue", so nothing applies on the first click. **Super Admin additionally requires typing that account's ID number** — it is the one role that can hand the same power to anyone else, and typing the ID forces a look at *who* is being promoted, which a yes/no button never does. The secondary button reads **Back**, not Cancel, so a wrong role choice costs one click. **Demotion has no confirmation at all**: it only removes access, and it is the undo for a mistaken promotion — friction there would make mistakes *harder* to correct.
+
+**A bug the screenshots caught, and a worse one the user caught.** Rendering the page revealed that accounts identified only by an ID showed **"9"** in their avatar instead of "90": three pages each had their own `initials()` taking the first letter of each space-separated *word*, which yields one character for a label with no spaces. Only one copy had been fixed when names became optional. All three now share `initialsOf()` in `utils/userLabel.js`.
+
+Then the user asked why granting a permission said **"null"** — and it was in **seven** places, not one: the permission toast, the permissions modal title, the grant/revoke confirmations, the reset-password prompt, and both delete messages. All read `user.name` directly instead of `userLabel()`. **The delete confirmation was the serious one** — *"Permanently delete null's account?"* is the dialog standing between an admin and destroying an account, and it named nobody. The backend was already correct; only these frontend call sites were missed.
 
 ### User Management promotes an existing account instead of creating a new one
 User request, and it follows directly from ID-number identity: everyone at the school registers themselves with their own ID, so an admin inventing a second account for a colleague who already has one just creates a duplicate person — and forced the admin to set, then somehow convey, a password for someone else. A Super Admin now promotes the account that person already uses.

@@ -143,7 +143,7 @@
   </tr>
   <tr>
     <td class="k">Super Admin</td>
-    <td>Full control: everything above, plus creating Staff/Super Admin accounts, granting and
+    <td>Full control: everything above, plus promoting existing accounts to Staff/Super Admin, granting and
         revoking the individual permissions above, and activating/deactivating any account.</td>
   </tr>
 </table>
@@ -160,8 +160,9 @@
 
 <h2 class="sub">3.1 Accounts &amp; Authentication</h2>
 <ul>
-  <li>Self-service registration for Student and Teacher accounts. Staff and Super Admin accounts can only be created by an existing Super Admin — there is no public signup for privileged roles.</li>
-  <li>Email/password login issuing a bearer token valid for 7 days (configurable) before re-login is required.</li>
+  <li>Self-service registration for Student and Teacher accounts using the school's 5-digit student/teacher <b>ID number</b> and an email address. <b>No name is collected</b> — it is held in the school's own records and retrieved from that ID number; until then, anywhere a name would appear (including the identity stamped on every page of a viewed PDF) falls back to the ID.</li>
+  <li>Sign-in is by <b>ID number and password</b>, issuing a bearer token valid for 7 days (configurable) before re-login is required.</li>
+  <li>Privileged roles are never created as new accounts. A Super Admin <b>promotes an existing account</b> to Staff or Super Admin — so each person keeps the one account they already use, and no administrator has to invent or convey a password on someone else's behalf. Promotions require confirmation, and promoting to Super Admin requires typing that account's ID number. Demotion uses the same control, so a promotion can always be undone.</li>
   <li>Self-service password change from a user's own profile; admin-assisted password reset for any account. By deliberate design there is <b>no self-service "forgot password" email flow</b> — resets are requested from staff in person.</li>
   <li>A single password policy — minimum 8 characters including upper-case, lower-case, and a number — enforced identically everywhere a password is set (registration, self-change, admin-created accounts, admin resets), with instant in-form feedback.</li>
   <li>Login is protected against password guessing: five <b>failed</b> attempts in a minute lock that account with a live "try again in N seconds" countdown. Only failures are counted and a successful sign-in clears them, so ordinary use is never blocked. The sign-in and registration endpoints additionally carry a 20-requests-per-minute ceiling, and every other endpoint is limited to 120 requests per minute as a general abuse and scraping guard.</li>
@@ -209,7 +210,7 @@
   <li><b>View-only PDF viewer.</b> Documents are never offered as a direct download to readers. Access is granted through a short-lived signed link generated per viewing session.</li>
   <li><b>Per-page live watermarking.</b> Every page of a document a reader opens is stamped, at the moment of viewing, with the viewing account's name and email plus a timestamp. The watermark is never baked into the stored file — it is applied per request, per reader, so a screenshot of <i>any</i> page is traceable to the person who opened it.</li>
   <li>Auto-generated <b>APA and MLA citations</b> for every collection, editable in place by staff. Readers can copy either format, and copy events are logged (which powers the Most Cited report).</li>
-  <li>Bookmarking ("Favorites") for any signed-in account, with bulk select/remove/export and cover thumbnails. A bookmark whose document was later deleted shows a clear "no longer available" placeholder and cleans itself up, instead of rendering a broken card.</li>
+  <li>Bookmarking for any signed-in account, with bulk select/remove/export and cover thumbnails. A bookmark whose document was later deleted shows a clear "no longer available" placeholder and cleans itself up, instead of rendering a broken card.</li>
   <li>Personal reading history, and a "Continue Reading" list on the dashboard drawn from the account's <i>own</i> reads.</li>
 </ul>
 
@@ -253,7 +254,7 @@
 
 <h2 class="sub">3.11 Administration</h2>
 <ul>
-  <li><b>User management</b> — create Staff/Super Admin accounts, activate/deactivate any account, delete accounts (subject to the role hierarchy), grant/revoke individual permissions, and perform admin-assisted password resets.</li>
+  <li><b>User management</b> — promote an existing account to Staff or Super Admin (and demote it back); accounts themselves are always self-registered with a school ID number, never created by an administrator. Activate/deactivate any account, delete accounts (subject to the role hierarchy), grant/revoke individual permissions, and perform admin-assisted password resets.</li>
   <li><b>Collection management</b> — the full collection list with search and filters, restrict/unrestrict, archive/unarchive, permission-gated delete, and the file replacement and version-history tools.</li>
   <li><b>Category management</b> with cover images.</li>
   <li><b>Active academic term</b> — the semester and school year displayed in the top bar are edited in place by a Super Admin: click the badge, choose the semester, set the starting school year. Rolling the system over to a new term therefore requires no code change and no redeployment. All other roles, and guests, see it as read-only text, and every change is recorded in the audit trail.</li>

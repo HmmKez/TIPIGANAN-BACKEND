@@ -562,6 +562,7 @@ const openThesis = async (thesisId) => {
   <span class="badge delete">DELETE</span> /favorites/{thesisId}<br>
   <span class="badge post">POST</span> /theses/{thesisId}/report
 </div>
+<p style="font-size:11px; color:#718096;"><b>Note on <code>/favorites</code>:</b> the feature is called <b>Bookmarks</b> everywhere a user sees it, and the database table is <code>bookmarks</code>. The API routes keep the older <code>/favorites</code> name deliberately — renaming them means coordinating a backend and a frontend deploy for something no user can see. Expect the mismatch; it is intentional.</p>
 
 <h2 class="sub">8.3 Staff and Super Admin only</h2>
 <div class="badge-row">
