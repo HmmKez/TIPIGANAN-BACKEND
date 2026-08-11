@@ -395,13 +395,17 @@ npm install
 npm run dev  <span class="cm"># runs at http://localhost:5173</span></pre>
 
 <h2 class="sub">5.3 Default test accounts</h2>
+<p><b>Sign in with the ID number, not the email.</b> Accounts are identified by the school's 5-digit student/teacher ID — that is the key the school's API uses to return a person's name and details, which is why registration no longer asks for a name. The email is kept only as a contact address.</p>
 <table class="doc-table">
-  <tr><th>Role</th><th>Email</th><th>Password</th></tr>
-  <tr><td>Super Admin</td><td>superadmin@tipiganan.com</td><td>password</td></tr>
-  <tr><td>Staff</td><td>staff@tipiganan.com</td><td>password</td></tr>
-  <tr><td>Student</td><td>student@tipiganan.com</td><td>password</td></tr>
-  <tr><td>Teacher</td><td>teacher@tipiganan.com</td><td>password</td></tr>
+  <tr><th>ID Number</th><th>Role</th><th>Email (contact only)</th><th>Password</th></tr>
+  <tr><td>90001</td><td>Super Admin</td><td>superadmin@tipiganan.com</td><td>password</td></tr>
+  <tr><td>90002</td><td>Staff</td><td>staff@tipiganan.com</td><td>password</td></tr>
+  <tr><td>90003</td><td>Student</td><td>student@tipiganan.com</td><td>password</td></tr>
+  <tr><td>90004</td><td>Teacher</td><td>teacher@tipiganan.com</td><td>password</td></tr>
+  <tr><td>90005</td><td>Student <i>(no name set)</i></td><td>student2@tipiganan.com</td><td>password</td></tr>
+  <tr><td>90006</td><td>Teacher <i>(no name set)</i></td><td>teacher2@tipiganan.com</td><td>password</td></tr>
 </table>
+<p style="font-size:11px; color:#718096;">Re-create them at any time with <code>php artisan db:seed --class=UserSeeder</code>. The last two deliberately have no name, matching what a real registration now produces — use them to catch anything that still assumes a name exists. Anywhere a name would be shown (including the PDF watermark) falls back to the ID number.</p>
 
 <!-- ============ 6 — NEW ============ -->
 <div class="page-break"></div>
@@ -496,9 +500,9 @@ export default api</pre>
 <h2 class="sub">7.2 Usage examples in React components</h2>
 <pre>import api from '../api/axios'
 
-<span class="cm">// Login — save token after successful login</span>
-const login = async (email, password) => {
-  const res = await api.post('/auth/login', { email, password })
+<span class="cm">// Login — accounts sign in with their 5-digit school ID number, not an email</span>
+const login = async (idNumber, password) => {
+  const res = await api.post('/auth/login', { id_number: idNumber, password })
   localStorage.setItem('token', res.data.token)
 }
 

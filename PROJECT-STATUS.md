@@ -94,6 +94,8 @@ app/
     VerifyThesisChecksums.php  NEW — `php artisan theses:verify-checksums` (fixity; §3 Tier 3)
     NormalizeThesisPdfs.php    NEW — `php artisan theses:normalize-pdfs` (backfill for PDFs stored
                                 before PdfNormalizer existed; --dry-run / --with-trashed)
+    GenerateBlueprint.php      NEW — `php artisan docs:blueprint` (System Blueprint rendered from the
+                                live schema, replacing a hand-written PDF that had no source)
 
 scripts/
   dev-services.ps1             NEW — starts MySQL + Meilisearch (and Memurai if elevated), or
@@ -813,6 +815,21 @@ User is connecting to the school's own system by API: the student/teacher **ID n
 
 **Tests 84 → 90**, and the new ones pin the rules that would be expensive to get wrong: registration does not require a name, a nameless user still has a `display_name` *and* it is serialised to the frontend, an ID cannot be registered twice, an ID must be exactly 5 digits, **a leading zero survives a round trip through the database and login**, and email-based login is now refused. **Verified in a real browser** end-to-end: signed in with ID `90003`, registered a fresh account with no name, and confirmed the sidebar shows `47478`, the avatar `47`, and the watermark would stamp `47478 · email` rather than blank.
 
+### Accounts reset to the dummies, and the blueprint made self-generating
+Follow-on from the ID-number change: the user asked to clear every account except the seeded dummies, and to bring the documentation in line.
+
+**Account reset — 15 accounts to 6.** Before deleting anything: a database backup was taken, and the blast radius was checked rather than assumed. That check mattered, because **`categories.created_by` is `ON DELETE CASCADE` and `theses.category_id` cascades from categories** — so deleting a user who had created a category would have taken the category *and every thesis in it*. Verified first that all 11 categories belong to the super admin being kept, and that the 9 doomed accounts owned **0 theses and 0 categories**. Result: theses (40), categories (11) and the audit trail (648 rows) all untouched; only the accounts and their personal data went (bookmarks 10 → 3, reading history 80 → 62).
+- **The audit trail was deliberately left intact.** `audit_logs.user_id` is `ON DELETE SET NULL`, so 113 entries survive with no account attached rather than being erased. An audit log that deletes itself when an account goes is not an audit log — this is the same reason there is no delete endpoint for it.
+- Surviving accounts: `90001` super admin, `90002` staff, `90003` student, `90004` teacher, `90005`/`90006` a second student and teacher **with no name set**, matching what a real registration now produces.
+
+**`backup:database` had never actually worked on this machine.** It failed with *"'mysqldump' is not recognized"* — Laragon keeps `mysqldump` inside its own MySQL folder rather than on PATH, which is exactly the case §7's deploy checklist warns about. Fixed by setting `DB_DUMP_BINARY` in `.env` (forward slashes, same dotenv rule as `QPDF_BINARY`). First successful backup: 190 KB. Worth noting that the daily scheduled backup would have been silently failing the same way.
+
+**The team guide (`guide:generate`) was still telling people to log in with an email.** Its "Default test accounts" table listed the four addresses with no ID numbers, and its React sample showed `api.post('/auth/login', { email, password })`. Both corrected, PDF regenerated, and copied to the Desktop documents folder — the previously generated copy there was from 8 July and had been stale ever since.
+
+**The System Blueprint is now generated from the live database** (`php artisan docs:blueprint` → `GenerateBlueprint.php` + `resources/views/pdf/blueprint.blade.php`). The old one was a **standalone PDF with no source file**, written in June, and by August it described a schema that no longer existed: `categories.parent_id` (subcategories were removed), a `user_permissions` pivot the app never used (it uses Spatie's tables), no `users.id_number`, and none of the tables added since — `settings`, `thesis_file_versions`, `thesis_reports`, `signed_url_tokens`, `bookmarks`. Nobody could fix it because there was nothing to edit but the PDF.
+- It now reads every table, column, type, key and **foreign-key delete rule** from `information_schema`, so it is a *report on* the database rather than a *description of* it and cannot drift again. Foreign keys are read from the constraints specifically because they are the part a hand-written document gets wrong first — as the `created_by` cascade above demonstrates.
+- Laravel's infrastructure tables and Spatie's permission tables are deliberately excluded, so the 12 tables that carry actual design decisions aren't buried among 20 that don't.
+
 ### One feature, two names: `favorites` → `bookmarks` (table only), and a count that never rendered
 User asked for the bookmark/favorites naming to be made consistent, then — before committing to the full rename — asked how big the impact would be.
 
@@ -925,7 +942,7 @@ The free tier of `setasign/fpdi` cannot parse PDF 1.5+ **object streams / cross-
 
 The last two deliberately have no name, matching what a real registration now produces — use them to catch anything still assuming a name exists. Re-create them all with `php artisan db:seed --class=UserSeeder`.
 
-**Every custom artisan command** (all seven — the scheduled ones fire on their own only once the deploy cron exists, see §7):
+**Every custom artisan command** (all nine — the scheduled ones fire on their own only once the deploy cron exists, see §7):
 ```bash
 php artisan test                              # full backend test suite — 90 tests, all passing
 
@@ -937,6 +954,10 @@ php artisan scout:import "App\Models\Thesis"  # backfill/re-sync all theses into
 # Documents
 php artisan docs:features                     # regenerate the capstone "System Functionalities" PDF
 php artisan guide:generate                    # regenerate the team guide PDF
+php artisan docs:blueprint                    # regenerate the System Blueprint from the LIVE database.
+                                              #   Every table, column and foreign-key rule is read from
+                                              #   information_schema, so it can never drift from the code.
+                                              #   --output= to write somewhere other than the default.
 
 # Data / assets
 php artisan categories:restore-covers         # restore each department's official MDC seal as its category
@@ -1105,7 +1126,7 @@ From the deploy-readiness diagnostic. **Tier 1 = must-do before going live; Tier
 ### Tier 2 — strongly recommended
 - [x] **Security headers** — API middleware DONE (`SecurityHeaders`). REMAINING (deploy): set the same headers on the frontend HTML in Nginx: `add_header X-Frame-Options SAMEORIGIN; add_header X-Content-Type-Options nosniff; add_header Referrer-Policy strict-origin-when-cross-origin; add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;`
 - [x] **Task scheduler** — schedule DEFINED in `routes/console.php` (purge daily, `backup:database` daily 02:00). REMAINING (deploy): one cron entry — `* * * * * cd /path/to/app && php artisan schedule:run >> /dev/null 2>&1` (Windows: a per-minute Task Scheduler task).
-- [x] **Backups** — `php artisan backup:database` command DONE (mysqldump → `storage/app/backups`, rotated). REMAINING (deploy): (a) if mysqldump isn't on PATH, set `DB_DUMP_BINARY`; (b) **move backups OFF the primary server** — copy `storage/app/backups` to the NAS/offsite/cloud on a schedule (RAID ≠ backup).
+- [x] **Backups** — `php artisan backup:database` command DONE (mysqldump → `storage/app/backups`, rotated). **Note: this was found silently failing on the dev machine (2026-08-11) because Laragon keeps mysqldump off PATH — now fixed via `DB_DUMP_BINARY`. Check the same on the server.** REMAINING (deploy): (a) confirm `DB_DUMP_BINARY` or mysqldump on PATH; (b) **move backups OFF the primary server** — copy `storage/app/backups` to the NAS/offsite/cloud on a schedule (RAID ≠ backup).
 - [ ] **PHP-FPM + OPcache** (concurrency + the ~500ms boot tax) — the runtime change that makes it production-grade; `artisan serve` is single-threaded (Known Issue #1). Optionally Laravel Octane to erase the boot cost entirely.
 - [ ] Meilisearch + queue worker (if async) supervised (NSSM on Windows / systemd on Linux).
 
