@@ -34,46 +34,89 @@ class UserController extends Controller
         return response()->json($user);
     }
 
-    // Super admin creates a staff account
-    public function store(Request $request)
+    // A Super Admin changes an existing account's role.
+    //
+    // Replaces the old "create a staff account" form. Everyone at the school
+    // registers themselves with their own ID number, so an admin inventing a
+    // second account for a colleague who already has one only creates a
+    // duplicate person — and required the admin to set (and then convey) a
+    // password for someone else. Promoting the account they already use avoids
+    // both, and keeps one account per ID number, which is the whole point of
+    // keying on the school ID.
+    //
+    // Demotion runs through the same endpoint deliberately: a promotion you
+    // cannot undo is worse than one you can, and an accidental Super Admin is
+    // otherwise permanent.
+    public function changeRole(Request $request, $id)
     {
         $request->validate([
-            // Staff and Super Admins are school employees, so they have an ID
-            // number too and log in with it exactly like everyone else.
-            'id_number' => 'required|digits:5|unique:users,id_number',
-            // Optional, unlike registration: an admin creating a colleague's
-            // account usually knows their name, and there is no reason to
-            // discard it while waiting for the school API.
-            'name'      => 'nullable|string|max:255',
-            'email'     => 'required|email|unique:users,email',
-            'password'  => ['required', 'string', Password::default()],
-            'role'      => 'required|in:staff,super_admin',
-        ], [
-            'id_number.digits' => 'The ID number must be exactly 5 digits.',
-            'id_number.unique' => 'An account already exists for that ID number.',
+            'role' => 'required|in:student,teacher,staff,super_admin',
         ]);
 
-        $user = User::create([
-            'id_number' => (string) $request->id_number,
-            'name'      => $request->name,
-            'email'     => $request->email,
-            'password'  => Hash::make($request->password),
-            'role'      => $request->role,
-            'status'    => 'active',
-        ]);
+        $user  = User::findOrFail($id);
+        $actor = $request->user();
+        $from  = $user->role;
+        $to    = $request->role;
 
-        $user->assignRole($request->role);
+        // Changing your own role is refused rather than guarded: a Super Admin
+        // demoting themselves would lose the very permission needed to undo it,
+        // and self-promotion is meaningless since only a Super Admin can reach
+        // this endpoint at all.
+        if ($user->id === $actor->id) {
+            return response()->json([
+                'message' => 'You cannot change your own role. Ask another Super Admin to do it.',
+            ], 403);
+        }
+
+        // Second line of defence against leaving nobody in charge.
+        //
+        // Note it is currently UNREACHABLE through the API, and that is fine:
+        // reaching this endpoint requires the super_admin role, and the self-
+        // change above is refused — so whenever the target is a Super Admin the
+        // actor is a different Super Admin who survives, and one always remains.
+        // The self-refusal is what actually guarantees the property. This stays
+        // because that reasoning depends on the check above, and a future change
+        // relaxing it would otherwise silently make it possible to strand the
+        // system with no administrator at all.
+        if ($from === 'super_admin' && $to !== 'super_admin') {
+            $remaining = User::where('role', 'super_admin')->where('id', '!=', $user->id)->count();
+
+            if ($remaining === 0) {
+                return response()->json([
+                    'message' => 'This is the only Super Admin. Promote another account first, or there would be nobody left who can manage the system.',
+                ], 422);
+            }
+        }
+
+        if ($from === $to) {
+            return response()->json([
+                'message' => 'That account already has this role.',
+            ], 422);
+        }
+
+        $user->update(['role' => $to]);
+        // Both have to move together: the `role` column is what the app reads,
+        // while Spatie's tables are what the permission middleware checks.
+        // Updating one without the other yields an account that looks promoted
+        // but is refused at every gate, or vice versa.
+        $user->syncRoles([$to]);
 
         AuditLog::create([
-            'user_id'     => $request->user()->id,
-            'action'      => 'create_user',
+            'user_id'     => $actor->id,
+            'action'      => 'change_user_role',
             'target_type' => 'user',
             'target_id'   => $user->id,
-            'description' => "{$request->user()->display_name} created account for {$user->display_name} as {$user->role}",
+            // Records what actually changed. The old generic "updated account"
+            // description could not tell a role change from an email edit,
+            // which is exactly the distinction an auditor cares about.
+            'description' => "{$actor->display_name} changed {$user->display_name}'s role from {$from} to {$to}",
             'ip_address'  => $request->ip(),
         ]);
 
-        return response()->json($user, 201);
+        return response()->json([
+            'message' => "Role changed from {$from} to {$to}.",
+            'user'    => $user->fresh(),
+        ]);
     }
 
     // Super admin updates a user
@@ -81,18 +124,19 @@ class UserController extends Controller
     {
         $user = User::findOrFail($id);
 
+        // Role is deliberately NOT accepted here. It used to be, with no guards
+        // at all — so this endpoint could demote the last Super Admin and lock
+        // everyone out of administration, or let a Super Admin demote
+        // themselves. Role changes now go through changeRole(), which carries
+        // those checks; leaving a second unguarded path open would make them
+        // decorative.
         $request->validate([
             'name'   => 'sometimes|string|max:255',
             'email'  => 'sometimes|email|unique:users,email,' . $id,
             'status' => 'sometimes|in:active,deactivated',
-            'role'   => 'sometimes|in:student,teacher,staff,super_admin',
         ]);
 
-        $user->update($request->only(['name', 'email', 'status', 'role']));
-
-        if ($request->has('role')) {
-            $user->syncRoles([$request->role]);
-        }
+        $user->update($request->only(['name', 'email', 'status']));
 
         AuditLog::create([
             'user_id'     => $request->user()->id,

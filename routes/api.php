@@ -92,7 +92,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Super admin only
     Route::middleware('role:super_admin')->group(function () {
-        Route::post('/users',                           [UserController::class, 'store']);
+        // No POST /users. Accounts are not created by an admin any more —
+        // everyone registers themselves with their school ID number, and a
+        // Super Admin promotes an existing account instead. The route is gone
+        // rather than merely hidden in the UI, so it cannot be called directly.
+        Route::patch('/users/{id}/role',                [UserController::class, 'changeRole']);
         Route::put('/users/{id}',                       [UserController::class, 'update']);
         Route::patch('/users/{id}/activate',            [UserController::class, 'activate']);
         Route::patch('/users/{id}/deactivate',          [UserController::class, 'deactivate']);

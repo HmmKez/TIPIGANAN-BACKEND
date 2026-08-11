@@ -587,7 +587,7 @@ const openThesis = async (thesisId) => {
 
 <h2 class="sub">8.4 Super Admin only</h2>
 <div class="badge-row">
-  <span class="badge post">POST</span> /users &nbsp;&nbsp;
+  <span class="badge patch">PATCH</span> /users/{id}/role &nbsp;&nbsp;
   <span class="badge put">PUT</span> /users/{id} &nbsp;&nbsp;
   <span class="badge delete">DELETE</span> /users/{id} &nbsp;&nbsp;
   <span class="badge patch">PATCH</span> /users/{id}/activate<br>

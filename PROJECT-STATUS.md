@@ -815,6 +815,19 @@ User is connecting to the school's own system by API: the student/teacher **ID n
 
 **Tests 84 → 90**, and the new ones pin the rules that would be expensive to get wrong: registration does not require a name, a nameless user still has a `display_name` *and* it is serialised to the frontend, an ID cannot be registered twice, an ID must be exactly 5 digits, **a leading zero survives a round trip through the database and login**, and email-based login is now refused. **Verified in a real browser** end-to-end: signed in with ID `90003`, registered a fresh account with no name, and confirmed the sidebar shows `47478`, the avatar `47`, and the watermark would stamp `47478 · email` rather than blank.
 
+### User Management promotes an existing account instead of creating a new one
+User request, and it follows directly from ID-number identity: everyone at the school registers themselves with their own ID, so an admin inventing a second account for a colleague who already has one just creates a duplicate person — and forced the admin to set, then somehow convey, a password for someone else. A Super Admin now promotes the account that person already uses.
+
+- **`PATCH /users/{id}/role`** (`UserController::changeRole`) replaces `POST /users`. The create route is **removed, not merely hidden in the UI**, so it cannot be called directly. Frontend: the page-level "Add User" button is gone and a **Change Role** action sits on each row, since promotion is about a specific person rather than a page-level action.
+- **Demotion runs through the same endpoint deliberately.** A promotion that cannot be undone is worse than one that can — an accidental Super Admin would otherwise be permanent.
+- **Two guards.** A Super Admin **cannot change their own role** (demoting yourself removes the permission needed to reverse it), and the role column and Spatie's tables are **synced together** — updating one alone yields an account that looks promoted but is refused at every permission gate, or vice versa.
+- **Closed an existing back door.** `PUT /users/{id}` already accepted `role` with **no guards whatsoever**: it could demote the last Super Admin or let one demote themselves. Role no longer passes through it, or every check above would have been decorative — a caller could simply use the other endpoint. There is a test pinning that specifically.
+- **Audit description now records the change itself** ("X changed Y's role from student to staff") instead of the old generic "updated account", which could not distinguish a privilege escalation from an email edit.
+
+**An honest note about one guard.** `changeRole()` also refuses to demote the last remaining Super Admin — and that check is currently **unreachable through the API**. Reaching the endpoint requires the super_admin role, and self-changes are refused, so whenever the target is a Super Admin the actor is a *different* Super Admin who survives; one always remains. **It is the self-refusal, not the count check, that actually guarantees the system keeps an administrator.** The count check stays as a second line of defence precisely because that reasoning depends on the self-refusal, and relaxing it later would otherwise silently make stranding the system possible. Two earlier tests of mine circled this impossibility and passed without demonstrating anything; they were replaced by one test that states the real property and proves the count floors at one.
+
+**Tests 90 → 98** (`UserRoleChangeTest`): promote, undo a promotion, self-change refused, the system always keeps a Super Admin, staff cannot change roles at all, `PUT /users/{id}` is not a privilege-escalation back door, `POST /users` returns 405, and the change is audit-logged with its before/after roles. **Verified in a browser** as a real Super Admin: no Add User button, no Change Role control on your own row, student 90003 promoted to staff and demoted back to student.
+
 ### Accounts reset to the dummies, and the blueprint made self-generating
 Follow-on from the ID-number change: the user asked to clear every account except the seeded dummies, and to bring the documentation in line.
 
@@ -944,7 +957,7 @@ The last two deliberately have no name, matching what a real registration now pr
 
 **Every custom artisan command** (all nine — the scheduled ones fire on their own only once the deploy cron exists, see §7):
 ```bash
-php artisan test                              # full backend test suite — 90 tests, all passing
+php artisan test                              # full backend test suite — 98 tests, all passing
 
 # Search index
 php artisan scout:sync-index-settings         # push Meilisearch filterable-attribute config
@@ -1070,7 +1083,7 @@ Organized by capability area, describing **the system as it stands today** — n
 - Editable profile (name, email, profile picture) and a Security tab (password change, plus a read-only view of the account's own roles and individually-granted permissions).
 
 ### 6.11 Administration
-- User account management — create Staff/Super Admin accounts, activate/deactivate any account, delete accounts (subject to the role hierarchy in §6.2), grant/revoke the two individually-grantable permissions, admin-assisted password reset.
+- User account management — **promote an existing account** to Staff or Super Admin (and demote it back); accounts themselves are always self-registered with a school ID number, never created by an admin. Activate/deactivate any account, delete accounts (subject to the role hierarchy in §6.2), grant/revoke the two individually-grantable permissions, admin-assisted password reset.
 - Collection management — the full thesis list with search/filter, restrict/unrestrict, archive/unarchive, permission-gated delete, plus the file-replace/version-history tools from §6.3.
 - Category management with cover images.
 - **Active academic term** — the semester and school year shown in the top bar are editable in place by a Super Admin (click the badge, pick the semester, set the starting year). No code change or redeploy is needed to roll over to a new term. Every other role, and guests, see it as read-only text. Changes are recorded in the audit trail. Falls back to a term derived from the current date if it has never been set.
@@ -1096,7 +1109,7 @@ Organized by capability area, describing **the system as it stands today** — n
 - **HTTPS enforced in production** (with reverse-proxy trust, so signed PDF-viewer URLs stay correct), and CORS locked to the configured frontend origin rather than any localhost.
 
 ### 6.15 Quality Assurance
-- Automated test suite (90 tests) covering the critical paths: authentication + password policy + login rate-limiting (including the browsing-must-not-consume-the-login-limit regression), role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users (including that displayed counts never advertise theses a user cannot open), Super-Admin-only editing of the active term and the landing hero image, the public landing payload (including a cache-serialization regression test that runs against a *serializing* cache store, since the suite's default in-memory store cannot reproduce it), the full file-replace → version-restore → checksum lifecycle, and PDF normalization (graceful degradation without qpdf, object-stream PDFs becoming FPDI-readable, a size guard pinning the `--qdf` decision, encrypted-PDF recovery, the assertion that a password-protected PDF is refused and left intact, and that an unviewable upload still succeeds but returns a warning naming the right cause). Run with `php artisan test`.
+- Automated test suite (98 tests) covering the critical paths: authentication + password policy + login rate-limiting (including the browsing-must-not-consume-the-login-limit regression), role-based access control and the role hierarchy, thesis visibility rules for guests vs. logged-in users (including that displayed counts never advertise theses a user cannot open), Super-Admin-only editing of the active term and the landing hero image, the public landing payload (including a cache-serialization regression test that runs against a *serializing* cache store, since the suite's default in-memory store cannot reproduce it), the full file-replace → version-restore → checksum lifecycle, and PDF normalization (graceful degradation without qpdf, object-stream PDFs becoming FPDI-readable, a size guard pinning the `--qdf` decision, encrypted-PDF recovery, the assertion that a password-protected PDF is refused and left intact, and that an unviewable upload still succeeds but returns a warning naming the right cause). Run with `php artisan test`.
 
 ---
 
@@ -1131,7 +1144,7 @@ From the deploy-readiness diagnostic. **Tier 1 = must-do before going live; Tier
 - [ ] Meilisearch + queue worker (if async) supervised (NSSM on Windows / systemd on Linux).
 
 ### Tier 3 — quality / repository completeness
-- [x] **Automated tests** — DONE: 90 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility + displayed counts, active-term settings, landing payload + hero upload + cache-serialization regression, file-versioning + checksum, PDF normalization + the `--qdf` size guard). Room to grow (search, reports, citations) but the critical paths are covered. They earned their keep: the suite is what pinned down the login-429 bug and the archived-theses miscount, and now guards against both returning.
+- [x] **Automated tests** — DONE: 98 passing (auth/password-policy/rate-limit, RBAC + role hierarchy, thesis visibility + displayed counts, active-term settings, landing payload + hero upload + cache-serialization regression, file-versioning + checksum, PDF normalization + the `--qdf` size guard). Room to grow (search, reports, citations) but the critical paths are covered. They earned their keep: the suite is what pinned down the login-429 bug and the archived-theses miscount, and now guards against both returning.
 - [x] **Timezone** — DONE: `Asia/Manila`, env-driven (`APP_TIMEZONE`). REMAINING (deploy): the prod template already sets it — just confirm it's applied on the fresh DB before go-live.
 - [x] **Fixity/checksums (#12)** — DONE: SHA-256 per file + `theses:verify-checksums` (weekly). REMAINING (deploy): the weekly schedule fires via the same `schedule:run` cron as Tier 2.
 - [x] **Load-test PDF-viewing** — DONE (dev floor measured): ~34ms/stamp, ~7–9 req/s at OPcache-off/4-worker; see §3 for the full interpretation + prod extrapolation. REMAINING: re-run against the deployed FPM+OPcache server with a large scanned thesis to get the real production ceiling.
@@ -1314,7 +1327,7 @@ php artisan tinker --execute="echo App\Models\Thesis::count();"
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\dev-services.ps1 -Status   # services
-php artisan test                                                            # 90 tests
+php artisan test                                                            # 98 tests
 php artisan theses:normalize-pdfs --dry-run --with-trashed                  # any unviewable PDFs?
 php artisan theses:verify-checksums                                         # file integrity
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/api/categories
