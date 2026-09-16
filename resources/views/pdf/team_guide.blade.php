@@ -336,6 +336,7 @@ git push origin feature/your-feature-name</pre>
 git pull origin dev
 git checkout feature/your-feature-name
 git merge dev</pre>
+<p style="font-size:11px; color:#718096;"><b>After any pull that touched the backend, run <code>php artisan migrate</code>.</b> If someone added a database column and you skip this, the app will fail with confusing "column not found" errors that look like a bug in their code rather than a missing step in yours. It is safe to run when there is nothing new — it simply reports "Nothing to migrate".</p>
 
 <h2 class="sub">4.4 Quick command reference</h2>
 <table class="doc-table">
@@ -406,6 +407,44 @@ npm run dev  <span class="cm"># runs at http://localhost:5173</span></pre>
   <tr><td>90006</td><td>Teacher <i>(no name set)</i></td><td>teacher2@tipiganan.com</td><td>password</td></tr>
 </table>
 <p style="font-size:11px; color:#718096;">Re-create them at any time with <code>php artisan db:seed --class=UserSeeder</code>. The last two deliberately have no name, matching what a real registration now produces — use them to catch anything that still assumes a name exists. Anywhere a name would be shown (including the PDF watermark) falls back to the ID number.</p>
+<p style="font-size:11px; color:#718096;">These six sit in a reserved <b>9xxxx</b> block that the school's real ID numbers will never use, and they are flagged <code>directory_exempt</code> — so switching on ID verification (section 5.4) can never lock you out of your own demo accounts.</p>
+
+<h2 class="sub">5.4 ID number verification against the school's records <span style="font-size:11px; background:#1e8a5f; color:#fff; padding:2px 8px;">NEW</span></h2>
+<p>Registration can check that an ID number belongs to a real, currently-enrolled student or a current member of faculty before creating the account. The school's own system is not available yet, so this runs against a fixture — but the whole flow is built, and connecting the real thing later changes one file.</p>
+<p><b>You do not need to set anything up.</b> Verification is <b>off by default</b>, so after <code>git pull</code> and <code>php artisan migrate</code> everything behaves exactly as it did before. Switch it on only when you want to see it.</p>
+<table class="doc-table">
+  <tr><th>Setting in .env</th><th>What happens</th></tr>
+  <tr><td><code>SCHOOL_DIRECTORY_DRIVER=off</code></td><td><b>Default.</b> No checking. Registration works as it always has, and the person picks their own role.</td></tr>
+  <tr><td><code>SCHOOL_DIRECTORY_DRIVER=fake</code></td><td>Checks against <code>database/fixtures/school-directory.json</code>. This is what to use for demos and for the defense.</td></tr>
+  <tr><td><code>SCHOOL_DIRECTORY_DRIVER=http</code></td><td>The school's real system. Needs <code>SCHOOL_DIRECTORY_URL</code> and usually <code>SCHOOL_DIRECTORY_KEY</code>. Not usable until their developer provides them.</td></tr>
+  <tr><td><code>SCHOOL_DIRECTORY_UNAVAILABLE=true</code></td><td>Pretends the school's system is down, so you can show the refusal on demand. Works with the <code>fake</code> driver only.</td></tr>
+</table>
+<p><b>Test ID numbers</b> (with <code>SCHOOL_DIRECTORY_DRIVER=fake</code>) — the fixture deliberately includes the awkward cases, not just working ones:</p>
+<table class="doc-table">
+  <tr><th>ID Number</th><th>What it is</th><th>Result</th></tr>
+  <tr><td>10234</td><td>Enrolled student</td><td>Accepted — "Welcome, Juan", registers as a Student</td></tr>
+  <tr><td>20101</td><td>Current faculty</td><td>Accepted — "Welcome, Ramon", registers as a Teacher</td></tr>
+  <tr><td>00042</td><td>Enrolled, leading zero</td><td>Accepted — proves the ID is not being treated as a number</td></tr>
+  <tr><td>10791</td><td>Stored surname-first</td><td>Accepted — greets "Rowena", not "Otadoy,"</td></tr>
+  <tr><td>10001</td><td>Graduated</td><td>Refused — no longer active</td></tr>
+  <tr><td>20099</td><td>Resigned faculty</td><td>Refused — no longer active</td></tr>
+  <tr><td>77777</td><td>Not in the records at all</td><td>Refused — not found</td></tr>
+</table>
+<p style="font-size:11px; color:#718096;"><b>Two things worth knowing before you change anything here.</b> First, the role is no longer the registrant's to choose — when verification is on, it comes from the school's records, because previously anyone could tick "Teacher" and get teacher-level access. Second, signing in never calls the school; it reads a column kept up to date separately. Putting their server in the login path would mean nobody could sign in whenever their system was slow or down.</p>
+<p style="font-size:11px; color:#718096;">The test suite pins the driver to <code>off</code> in <code>phpunit.xml</code> regardless of your <code>.env</code>, so switching your own machine to <code>fake</code> will not break anyone's tests. Tests that need verification switch it on themselves.</p>
+
+<h2 class="sub">5.5 Scan inbox — filing a scanned thesis <span style="font-size:11px; background:#1e8a5f; color:#fff; padding:2px 8px;">NEW</span></h2>
+<p>The Upload Item page lists PDFs the library scanner has already produced, so staff attach one with a click instead of hunting for it in a file browser. Choosing a scan replaces the usual "browse for a file" step; the two are alternatives and the backend requires exactly one.</p>
+<p><b>The system never talks to the scanner.</b> The library's scanner is a <b>ScanSnap SV600</b> — USB-only, and it reports a vendor-specific USB class, meaning no standard scanning protocol can reach it. It is driven solely by Fujitsu's ScanSnap Home. So ScanSnap Home is configured to save PDFs into a folder, and TIPIGANAN watches that folder. This is also why it does not matter that a USB scanner has exactly one host PC: what is shared is the folder, not the device, so any number of staff machines can file the scans.</p>
+<table class="doc-table">
+  <tr><th>Setting in .env</th><th>What it does</th></tr>
+  <tr><td><code>SCAN_INBOX_ENABLED</code></td><td>Turn the feature on or off. Default on.</td></tr>
+  <tr><td><code>SCAN_INBOX_PATH</code></td><td>The folder to watch. Blank uses <code>storage/app/scan-inbox</code> for local development. In production this points at the NAS share ScanSnap Home writes to. <b>Use forward slashes on Windows</b> — a backslash is an escape character to dotenv and breaks the whole file.</td></tr>
+  <tr><td><code>SCAN_INBOX_SETTLE_SECONDS</code></td><td>How long a file must sit untouched before it is offered. Default 5. A scanner writing a large PDF leaves a file that exists but is not finished, and attaching one mid-write gives a corrupt document.</td></tr>
+</table>
+<p><b>To try it locally</b>, drop any PDF into <code>storage/app/scan-inbox</code> and open the Upload Item page — it appears in the list. Filing it moves the file into the repository and removes it from the folder, so the same scan cannot be filed twice by accident.</p>
+<p style="font-size:11px; color:#718096;"><b>An empty list and an unreachable folder are shown differently, and that distinction matters.</b> "No scans waiting" means the folder is fine and empty; "the scan folder cannot be reached" almost always means the NAS share is not mounted. Reporting the second as the first would send staff to check the scanner when the problem is the storage.</p>
+<p style="font-size:11px; color:#718096;">The filename in an import request comes from the browser, so <code>ScanInbox::resolve()</code> is the single place it is made safe — it strips any directory part and then checks the resolved path really is inside the inbox. <b>Any new method that accepts a filename must go through it.</b> There is a test that plants a real PDF outside the folder and proves it cannot be reached or deleted.</p>
 
 <!-- ============ 6 — NEW ============ -->
 <div class="page-break"></div>
@@ -543,9 +582,11 @@ const openThesis = async (thesisId) => {
   <span class="badge get">GET</span> /search?q=keyword &nbsp;&nbsp;
   <span class="badge get">GET</span> /theses/{id}/citations &nbsp;&nbsp;
   <span class="badge get">GET</span> /theses/{id}/citations/generate<br>
+  <span class="badge post">POST</span> /auth/register/verify &nbsp;&nbsp;
   <span class="badge post">POST</span> /auth/register &nbsp;&nbsp;
   <span class="badge post">POST</span> /auth/login
 </div>
+<p style="font-size:11px; color:#718096;"><code>/auth/register/verify</code> is step one of registration — it checks an ID number against the school's records before the sign-up form asks for anything else. See section 5.4.</p>
 
 <h2 class="sub">8.2 Protected endpoints — all logged-in users</h2>
 <div class="badge-row">
@@ -571,6 +612,8 @@ const openThesis = async (thesisId) => {
   <span class="badge patch">PATCH</span> /theses/{id}/archive &nbsp;&nbsp;
   <span class="badge patch">PATCH</span> /theses/{id}/status<br>
   <span class="badge get">GET</span> /theses/{id}/download &nbsp;&nbsp;
+  <span class="badge get">GET</span> /scan-inbox &nbsp;&nbsp;
+  <span class="badge delete">DELETE</span> /scan-inbox/{name}<br>
   <span class="badge post">POST</span> /categories &nbsp;&nbsp;
   <span class="badge put">PUT</span> /categories/{id} &nbsp;&nbsp;
   <span class="badge delete">DELETE</span> /categories/{id}<br>
