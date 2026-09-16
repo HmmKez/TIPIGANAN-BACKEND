@@ -10,6 +10,7 @@ use App\Models\SignedUrlToken;
 use App\Models\Thesis;
 use App\Models\ThesisFileVersion;
 use App\Support\PdfNormalizer;
+use App\Support\ScanInbox;
 use App\Support\ThesisFilePurger;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -17,6 +18,7 @@ use App\Jobs\ProcessThesisOcr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 class ThesisController extends Controller
 {
@@ -337,6 +339,53 @@ class ThesisController extends Controller
     }
 
     // Staff and above — upload new thesis
+    /**
+     * Take a PDF the scanner left in the inbox into the repository.
+     *
+     * Copy-then-delete rather than rename: the inbox normally lives on the NAS
+     * while stored theses live on the app's own disk, and rename() cannot cross
+     * a filesystem boundary - it would fail every time in production while
+     * working perfectly on a developer's machine.
+     *
+     * The original is removed only after the copy is safely in place, so a
+     * failure loses nothing: the scan stays in the inbox and staff can retry.
+     *
+     * @throws ValidationException when the file is missing, unreadable, or too big.
+     */
+    private function importFromScanInbox(string $name): string
+    {
+        $inbox = app(ScanInbox::class);
+
+        try {
+            $source = $inbox->resolve($name);
+        } catch (\RuntimeException $e) {
+            throw ValidationException::withMessages(['scan_file' => [$e->getMessage()]]);
+        }
+
+        // An uploaded file is size-checked by the `max:` rule; a scan never
+        // passes through validation, so the same ceiling has to be applied here
+        // or the inbox becomes a way around it.
+        $maxBytes = 153600 * 1024;
+
+        if (filesize($source) > $maxBytes) {
+            throw ValidationException::withMessages([
+                'scan_file' => ['That scan is larger than the 150MB limit.'],
+            ]);
+        }
+
+        $target = 'theses/'.Str::random(40).'.pdf';
+
+        if (! Storage::disk('local')->put($target, file_get_contents($source))) {
+            throw ValidationException::withMessages([
+                'scan_file' => ['The scanned file could not be copied out of the inbox. Please try again.'],
+            ]);
+        }
+
+        $inbox->discard($name);
+
+        return $target;
+    }
+
     public function store(Request $request)
     {
         $request->validate([
@@ -352,12 +401,16 @@ class ThesisController extends Controller
             'category_id'    => 'required|exists:categories,id',
             'pages'          => 'nullable|integer',
             'cover_image'    => 'nullable|image|max:2048',
-            'pdf_file'       => 'required|mimes:pdf|max:153600',
+            // Exactly one of these. `pdf_file` is the ordinary upload;
+            // `scan_file` names a PDF the scanner already left in the inbox,
+            // which saves staff downloading and re-uploading their own scan.
+            'pdf_file'       => 'required_without:scan_file|nullable|mimes:pdf|max:153600',
+            'scan_file'      => 'required_without:pdf_file|nullable|string|max:255',
         ]);
 
-        // Store PDF
-        $pdfPath = $request->file('pdf_file')
-            ->store('theses', 'local');
+        $pdfPath = $request->filled('scan_file')
+            ? $this->importFromScanInbox($request->input('scan_file'))
+            : $request->file('pdf_file')->store('theses', 'local');
 
         // Rewrite into an FPDI-readable structure and find out whether a reader
         // will actually be able to open it. Never blocks the upload.

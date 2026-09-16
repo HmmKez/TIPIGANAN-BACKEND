@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\CitationController;
 use App\Http\Controllers\Api\FavoriteController;
 use App\Http\Controllers\Api\LandingController;
+use App\Http\Controllers\Api\ScanInboxController;
 use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\SettingController;
 use App\Http\Controllers\Api\ThesisController;
@@ -25,8 +26,13 @@ Route::middleware('throttle:api')->group(function () {
 // Public routes
 Route::prefix('auth')->group(function () {
     Route::middleware('throttle:auth')->group(function () {
-        Route::post('/register', [AuthController::class, 'register']);
-        Route::post('/login',    [AuthController::class, 'login']);
+        // Step one of registration: check the ID number against the school's
+        // records before asking for anything else. Its own per-IP ceiling lives
+        // in AuthController::verifyIdNumber, because this endpoint reveals
+        // which ID numbers are real and needs a tighter limit than sign-in.
+        Route::post('/register/verify', [AuthController::class, 'verifyIdNumber']);
+        Route::post('/register',        [AuthController::class, 'register']);
+        Route::post('/login',           [AuthController::class, 'login']);
     });
 });
 
@@ -158,6 +164,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::put('/categories/{id}',          [CategoryController::class, 'update']);
         Route::post('/categories/{id}/cover-image', [CategoryController::class, 'uploadCoverImage']);
         Route::delete('/categories/{id}',       [CategoryController::class, 'destroy']);
+
+        // What the scanner has left waiting. Staff-only: listing the inbox
+        // reveals what has recently been scanned in the library.
+        // `{name}` is constrained to a filename because the default pattern
+        // would let a slash through and turn it into a path.
+        Route::get('/scan-inbox',               [ScanInboxController::class, 'index']);
+        Route::delete('/scan-inbox/{name}',     [ScanInboxController::class, 'destroy'])
+            ->where('name', '[^/\\\\]+');
 
         Route::post('/theses',                  [ThesisController::class, 'store']);
         Route::put('/theses/{id}',              [ThesisController::class, 'update']);
