@@ -6,6 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\User;
 use App\Support\SafeCache;
+use App\Support\SchoolDirectory\DirectoryPerson;
+use App\Support\SchoolDirectory\DirectoryUnavailable;
+use App\Support\SchoolDirectory\SchoolDirectory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -33,8 +36,125 @@ class AuthController extends Controller
         );
     }
 
-    public function register(Request $request)
+    /**
+     * Step one of registration: confirm the ID number belongs to a real,
+     * currently-enrolled student or a current member of faculty.
+     *
+     * Answers only enough to let the person continue - a first name and their
+     * role - never the full record. See the throttling note below for why.
+     */
+    public function verifyIdNumber(Request $request, SchoolDirectory $directory)
     {
+        $request->validate([
+            'id_number' => 'required|digits:5',
+        ], [
+            'id_number.digits' => 'Your ID number must be exactly 5 digits.',
+        ]);
+
+        $idNumber = (string) $request->input('id_number');
+
+        // This endpoint takes an ID number and reports whether it is real,
+        // which is precisely the shape of thing somebody would run from 00000
+        // to 99999 to harvest valid IDs and names.
+        //
+        // Note the difference from login: there, only FAILED attempts count,
+        // because a legitimate user signing in repeatedly is normal. Here EVERY
+        // attempt counts, because enumeration is made of *successful* lookups -
+        // counting only failures would leave the attack completely unthrottled.
+        $throttleKey = 'verify-id:'.$request->ip();
+        $maxAttempts = (int) config('school.directory.verify_attempts_per_minute', 8);
+
+        if (SafeCache::tooManyAttempts($throttleKey, $maxAttempts)) {
+            $seconds = SafeCache::availableIn($throttleKey);
+
+            throw ValidationException::withMessages([
+                'id_number' => ["Too many attempts. Please try again in {$seconds} seconds."],
+            ])->status(429);
+        }
+
+        SafeCache::hit($throttleKey, 60);
+
+        // Verification switched off: tell the frontend to fall back to the
+        // single-step form rather than leaving it waiting on a check that will
+        // never happen.
+        if (! $directory->isEnabled()) {
+            return response()->json(['verification_required' => false]);
+        }
+
+        if (User::where('id_number', $idNumber)->exists()) {
+            throw ValidationException::withMessages([
+                'id_number' => ['An account already exists for that ID number. Try signing in instead.'],
+            ]);
+        }
+
+        $person = $this->lookUpOrRefuse($directory, $idNumber);
+
+        AuditLog::create([
+            'user_id'     => null,
+            'action'      => 'verify_id_number',
+            'target_type' => 'user',
+            'target_id'   => null,
+            'description' => "ID number {$idNumber} was checked against the school directory",
+            'ip_address'  => $request->ip(),
+        ]);
+
+        return response()->json([
+            'verification_required' => true,
+            'id_number'             => $idNumber,
+            // First name only, never the full name. It keeps the "the system
+            // recognised me" moment that makes the check visible, while making
+            // the endpoint far less rewarding to anyone harvesting names.
+            'first_name'            => $person->firstName(),
+            'role'                  => $person->appRole(),
+            'program'               => $person->program,
+            'has_school_email'      => filled($person->email),
+        ]);
+    }
+
+    /**
+     * Look an ID up and turn every unusable outcome into the right refusal.
+     *
+     * The three failure modes are deliberately distinct, because they mean
+     * genuinely different things to the person on the other side: "that number
+     * isn't ours", "it was ours and no longer is", and "we can't tell you right
+     * now". Collapsing them into one message would leave a graduate and a typo
+     * indistinguishable to the library staff trying to help.
+     */
+    private function lookUpOrRefuse(SchoolDirectory $directory, string $idNumber): DirectoryPerson
+    {
+        try {
+            $person = $directory->lookup($idNumber);
+        } catch (DirectoryUnavailable $e) {
+            report($e);
+
+            // Refuse rather than admit an unverified account. Registration is
+            // not time-critical - a person can come back in ten minutes - and
+            // letting accounts through unchecked whenever the school's system
+            // hiccups would defeat the entire point of verifying them.
+            throw ValidationException::withMessages([
+                'id_number' => ["We couldn't reach the school's records right now. Please try again shortly, or ask the library for help."],
+            ])->status(503);
+        }
+
+        if (! $person) {
+            throw ValidationException::withMessages([
+                'id_number' => ['We could not find that ID number in the school records. Please check it and try again, or ask the library for help.'],
+            ]);
+        }
+
+        if (! $person->isActive()) {
+            throw ValidationException::withMessages([
+                'id_number' => ['That ID number is no longer active in the school records. Please visit the library if you think this is a mistake.'],
+            ]);
+        }
+
+        return $person;
+    }
+
+    public function register(Request $request, SchoolDirectory $directory)
+    {
+        $verifying = $directory->isEnabled();
+
         $request->validate([
             // The school's 5-digit student/teacher ID. `digits:5` keeps a
             // leading-zero ID like "00123" valid, which a numeric rule such as
@@ -42,23 +162,46 @@ class AuthController extends Controller
             'id_number' => 'required|digits:5|unique:users,id_number',
             'email'     => 'required|email|unique:users,email',
             'password'  => ['required', 'string', 'confirmed', Password::default()],
-            'role'      => 'required|in:student,teacher',
+            // The role is only the registrant's to choose while verification is
+            // off. Once it is on, the school decides - see below.
+            'role'      => $verifying ? 'nullable' : 'required|in:student,teacher',
         ], [
             'id_number.digits' => 'Your ID number must be exactly 5 digits.',
             'id_number.unique' => 'An account already exists for that ID number.',
         ]);
 
-        // No name is collected. It comes from the school's API, keyed on the ID
-        // number; until then display falls back to the ID (User::display_name).
+        $idNumber = (string) $request->id_number;
+
+        // Fields the school decides, not the registrant. Null when verification
+        // is switched off, which leaves the previous behaviour untouched.
+        $person = null;
+
+        if ($verifying) {
+            // Deliberately checked AGAIN here, even though verifyIdNumber()
+            // already did. Nothing stops a client skipping step one and posting
+            // straight to this endpoint with role=teacher, so the only answer
+            // that can be trusted is the one this request fetches itself.
+            $person = $this->lookUpOrRefuse($directory, $idNumber);
+        }
+
+        // The name is never collected from the registrant - it comes from the
+        // school, and until it does, display falls back to the ID number
+        // (User::display_name).
         $user = User::create([
-            'id_number' => (string) $request->id_number,
-            'email'     => $request->email,
-            'password'  => Hash::make($request->password),
-            'role'      => $request->role,
-            'status'    => 'active',
+            'id_number'            => $idNumber,
+            'name'                 => $person?->fullName,
+            'email'                => $request->email,
+            'password'             => Hash::make($request->password),
+            // The school's answer wins outright. A registrant claiming to be a
+            // teacher gets whatever the records actually say they are.
+            'role'                 => $person?->appRole() ?? $request->role,
+            'status'               => 'active',
+            'directory_status'     => $person?->status,
+            'directory_checked_at' => $person ? now() : null,
+            'directory_person_key' => $person?->personKey,
         ]);
 
-        $user->assignRole($request->role);
+        $user->assignRole($user->role);
 
         AuditLog::create([
             'user_id'     => $user->id,
@@ -119,6 +262,18 @@ class AuthController extends Controller
         if ($user->status === 'deactivated') {
             return response()->json([
                 'message' => 'Your account has been deactivated. Please contact the administrator.',
+            ], 403);
+        }
+
+        // Deliberately reads only what was recorded locally by the last
+        // directory check - signing in NEVER calls the school's system. Putting
+        // their server in the login path would mean that whenever it is slow or
+        // down, nobody can sign in to TIPIGANAN at all, in exchange for
+        // re-confirming an answer that changes at most once a semester. The
+        // nightly reconciliation keeps this column current instead.
+        if ($user->isRevokedByDirectory()) {
+            return response()->json([
+                'message' => 'Your ID number is no longer active in the school records, so this account has been closed. Please visit the library if you think this is a mistake.',
             ], 403);
         }
 

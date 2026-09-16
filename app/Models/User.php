@@ -14,6 +14,7 @@ class User extends Authenticatable
 
     protected $fillable = [
         'name', 'id_number', 'email', 'password', 'role', 'status', 'avatar_path',
+        'directory_status', 'directory_checked_at', 'directory_person_key', 'directory_exempt',
     ];
 
     protected $hidden = [
@@ -41,9 +42,28 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
-            'password' => 'hashed',
+            'email_verified_at'    => 'datetime',
+            'password'             => 'hashed',
+            'directory_checked_at' => 'datetime',
+            'directory_exempt'     => 'boolean',
         ];
+    }
+
+    /**
+     * Has the school's own system said this person is no longer part of the
+     * school - graduated, resigned, dropped?
+     *
+     * Reads only what was recorded locally by the last check; it never calls
+     * the school. A null status means "never checked", which covers every
+     * account created before verification existed and must NOT lock anyone out.
+     */
+    public function isRevokedByDirectory(): bool
+    {
+        if ($this->directory_exempt || $this->directory_status === null) {
+            return false;
+        }
+
+        return ! in_array($this->directory_status, ['enrolled', 'active', 'employed'], true);
     }
 
     public function theses()

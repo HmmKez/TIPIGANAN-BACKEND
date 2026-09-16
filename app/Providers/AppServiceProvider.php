@@ -2,6 +2,10 @@
 
 namespace App\Providers;
 
+use App\Support\SchoolDirectory\FakeSchoolDirectory;
+use App\Support\SchoolDirectory\HttpSchoolDirectory;
+use App\Support\SchoolDirectory\NullSchoolDirectory;
+use App\Support\SchoolDirectory\SchoolDirectory;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -16,7 +20,26 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Pick the source that ID numbers are verified against. Everything else
+        // in the app depends on the SchoolDirectory interface and never on a
+        // concrete class, so moving from the fixture to the school's real
+        // system is this one config value - see config/school.php.
+        $this->app->singleton(SchoolDirectory::class, function () {
+            $config = config('school.directory');
+
+            return match ($config['driver']) {
+                'fake' => new FakeSchoolDirectory(
+                    fixturePath:     $config['fixture'],
+                    simulateOutage:  (bool) $config['simulate_outage'],
+                ),
+                'http' => new HttpSchoolDirectory(
+                    baseUrl: (string) $config['url'],
+                    apiKey:  $config['key'],
+                    timeout: (int) $config['timeout'],
+                ),
+                default => new NullSchoolDirectory(),
+            };
+        });
     }
 
     /**

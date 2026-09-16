@@ -1,0 +1,152 @@
+[
+  {
+    "_comment": "Pretend student and faculty records, standing in for the school's system until it is available. Chosen to cover the cases that break in production, not just the ones that work. Used by FakeSchoolDirectory (SCHOOL_DIRECTORY_DRIVER=fake) and by the test suite.",
+    "id_number": "10234",
+    "status": "enrolled",
+    "type": "student",
+    "full_name": "Juan Dela Cruz",
+    "school_email": "jdelacruz@mdc.edu.ph",
+    "program": "BS Information Technology",
+    "person_id": "MDC-0000481922"
+  },
+  {
+    "_comment": "Second ordinary student, for tests needing two distinct people.",
+    "id_number": "10235",
+    "status": "enrolled",
+    "type": "student",
+    "full_name": "Maria Santos",
+    "school_email": "msantos@mdc.edu.ph",
+    "program": "BS Nursing",
+    "person_id": "MDC-0000481923"
+  },
+  {
+    "id_number": "20101",
+    "status": "employed",
+    "type": "faculty",
+    "full_name": "Ramon Villanueva",
+    "school_email": "rvillanueva@mdc.edu.ph",
+    "program": "College of Computer Studies",
+    "person_id": "MDC-0000112004"
+  },
+  {
+    "_comment": "GRADUATED. Exists in the records but must not be allowed to register, and an existing account for this ID must lose access. The whole point of the feature.",
+    "id_number": "10001",
+    "status": "graduated",
+    "type": "student",
+    "full_name": "Andrea Lim",
+    "school_email": "alim@mdc.edu.ph",
+    "program": "BS Business Administration",
+    "person_id": "MDC-0000410877"
+  },
+  {
+    "_comment": "RESIGNED faculty. Same refusal path as a graduate, different wording in the records.",
+    "id_number": "20099",
+    "status": "resigned",
+    "type": "faculty",
+    "full_name": "Teresita Cabahug",
+    "school_email": "tcabahug@mdc.edu.ph",
+    "program": "College of Education",
+    "person_id": "MDC-0000098331"
+  },
+  {
+    "_comment": "ON LEAVE. Not an active status, so access is refused - flagged here because a real school may well want this one allowed. Confirm with the registrar rather than assuming.",
+    "id_number": "10456",
+    "status": "on_leave",
+    "type": "student",
+    "full_name": "Paolo Escobar",
+    "school_email": "pescobar@mdc.edu.ph",
+    "program": "BS Criminology",
+    "person_id": "MDC-0000455120"
+  },
+  {
+    "_comment": "LEADING ZERO. Breaks any system that treats an ID number as an integer - 00042 becomes 42 and the person can never register. users.id_number is CHAR(5) precisely to prevent this.",
+    "id_number": "00042",
+    "status": "enrolled",
+    "type": "student",
+    "full_name": "Grace Bongcales",
+    "school_email": "gbongcales@mdc.edu.ph",
+    "program": "BS Accountancy",
+    "person_id": "MDC-0000502288"
+  },
+  {
+    "_comment": "NO EMAIL ON RECORD. Real rosters have gaps. Registration must still work, just without the option to send a verification code.",
+    "id_number": "10789",
+    "status": "enrolled",
+    "type": "student",
+    "full_name": "Nestor Aparece",
+    "program": "BS Marine Biology",
+    "person_id": "MDC-0000499001"
+  },
+  {
+    "_comment": "NO PERMANENT PERSON KEY. Stands in for a school that cannot supply one, in which case a reissued ID number has to be assumed to be a different person. See Known Issue #24.",
+    "id_number": "10790",
+    "status": "enrolled",
+    "type": "student",
+    "full_name": "Cristina Bagares",
+    "school_email": "cbagares@mdc.edu.ph",
+    "program": "BS Psychology"
+  },
+  {
+    "_comment": "SURNAME-FIRST NAME. Records systems often store names this way; the greeting must still say 'Rowena', not 'Otadoy,'.",
+    "id_number": "10791",
+    "status": "enrolled",
+    "type": "student",
+    "full_name": "Otadoy, Rowena Mae",
+    "school_email": "rotadoy@mdc.edu.ph",
+    "program": "BS Hospitality Management",
+    "person_id": "MDC-0000503111"
+  },
+  {
+    "_comment": "The seeded demo accounts, in the reserved 9xxxx block so they never collide with real school IDs. Present so the existing dummy logins keep working with verification switched on.",
+    "id_number": "90001",
+    "status": "employed",
+    "type": "faculty",
+    "full_name": "Demo Super Admin",
+    "school_email": "superadmin@mdc.edu.ph",
+    "program": "Library",
+    "person_id": "MDC-9000000001"
+  },
+  {
+    "id_number": "90002",
+    "status": "employed",
+    "type": "faculty",
+    "full_name": "Demo Library Staff",
+    "school_email": "staff@mdc.edu.ph",
+    "program": "Library",
+    "person_id": "MDC-9000000002"
+  },
+  {
+    "id_number": "90003",
+    "status": "enrolled",
+    "type": "student",
+    "full_name": "Demo Student",
+    "school_email": "student@mdc.edu.ph",
+    "program": "BS Information Technology",
+    "person_id": "MDC-9000000003"
+  },
+  {
+    "id_number": "90004",
+    "status": "employed",
+    "type": "faculty",
+    "full_name": "Demo Teacher",
+    "school_email": "teacher@mdc.edu.ph",
+    "program": "College of Computer Studies",
+    "person_id": "MDC-9000000004"
+  },
+  {
+    "id_number": "90005",
+    "status": "employed",
+    "type": "faculty",
+    "school_email": "staff2@mdc.edu.ph",
+    "program": "Library",
+    "person_id": "MDC-9000000005"
+  },
+  {
+    "id_number": "90006",
+    "status": "enrolled",
+    "type": "student",
+    "school_email": "student2@mdc.edu.ph",
+    "program": "BS Nursing",
+    "person_id": "MDC-9000000006"
+  }
+]

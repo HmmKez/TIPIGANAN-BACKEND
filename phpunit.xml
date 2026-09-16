@@ -29,6 +29,14 @@
         <!-- Keep tests off Meilisearch — the collection engine is a no-op on
              writes, so creating theses never tries to reach a search server. -->
         <env name="SCOUT_DRIVER" value="collection"/>
+        <!-- Pin ID-number verification OFF for the suite, regardless of what a
+             developer has in their own .env. Without this, switching the local
+             driver to `fake` to try the feature out silently breaks every
+             registration test — the suite would be reporting on that machine's
+             configuration rather than on the code. Tests that need verification
+             switch it on themselves with config(). -->
+        <env name="SCHOOL_DIRECTORY_DRIVER" value="off"/>
+        <env name="SCHOOL_DIRECTORY_UNAVAILABLE" value="false"/>
         <env name="DB_URL" value=""/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
