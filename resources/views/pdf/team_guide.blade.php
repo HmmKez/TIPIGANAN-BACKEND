@@ -448,6 +448,20 @@ npm run dev  <span class="cm"># runs at http://localhost:5173</span></pre>
 
 <!-- ============ 6 — NEW ============ -->
 <div class="page-break"></div>
+<h2 class="sub">5.6 Reading uploaded documents (OCR) — in the request, or in the background <span style="font-size:11px; background:#1e8a5f; color:#fff; padding:2px 8px;">NEW</span></h2>
+<p>When a thesis is uploaded, the system reads the PDF to fill in the Abstract and Keywords, using OCR when the document is a scan. This is slow: a real 36-page scanned thesis took <b>4 minutes 41 seconds</b>. Where that work happens is controlled by one setting.</p>
+<table class="doc-table">
+  <tr><th>Setting in .env</th><th>What happens</th></tr>
+  <tr><td><code>QUEUE_CONNECTION=sync</code></td><td><b>Default.</b> The document is read during the upload request. Nothing extra to set up, but the staff member waits for it, and on <code>php artisan serve</code> that one request blocks the whole site until it finishes.</td></tr>
+  <tr><td><code>QUEUE_CONNECTION=database</code></td><td>The upload returns in about a tenth of a second; the reading happens in a separate worker process. The edit screen shows "Reading the document…" and fills the Abstract and Keywords in by itself when the worker finishes.</td></tr>
+</table>
+<p><b>With <code>database</code> you must run a worker</b>, or uploaded documents are never read at all:</p>
+<pre>php artisan queue:work --tries=1 --timeout=900</pre>
+<p><code>scripts\dev-services.ps1</code> starts it for you and reports whether it is running. On a server it must be kept alive (Supervisor, or NSSM / Task Scheduler on Windows) and restarted after every deploy with <code>php artisan queue:restart</code> — a worker keeps the old code in memory until it is.</p>
+<p style="font-size:11px; color:#718096;"><b>Why the default is still <code>sync</code>.</b> It works on any host with no extra moving parts. A missing worker is a silent failure — uploads succeed and abstracts simply never appear — so the edit screen shows a warning if a document has been waiting more than two minutes, and the services script reports the worker as DOWN. Use <code>sync</code> unless you have somewhere to keep a worker running.</p>
+<p style="font-size:11px; color:#718096;"><b>If a reading is interrupted</b> — the request is cancelled, or a worker is restarted mid-job — the record can be left saying <code>processing</code> with nothing running to finish it. The edit screen notices after two minutes and tells staff to use <b>Re-extract from current file</b>, which starts the reading again. Nothing recovers it automatically.</p>
+<p style="font-size:11px; color:#718096;">Two related details. A thesis carries its own <code>ocr_status</code> (<code>pending</code> → <code>processing</code> → <code>done</code> or <code>failed</code>); <b><code>done</code> means the reading finished, not that anything was found</b> — a scan too poor to read leaves the Abstract empty and is still done, because re-running it would produce the same nothing. And the upload's audit-trail entry is written <b>before</b> the reading starts, so a thesis can never exist in the repository without a record of who uploaded it, however the reading ends.</p>
+
 <h1 class="section">6. Meilisearch Setup <span style="font-size:11px; background:#1e8a5f; padding:2px 8px;">NEW</span></h1>
 <p>Meilisearch powers fast, typo-tolerant search across the repository. It runs as its own small local service alongside Laravel and React — one-time setup per developer machine, a few minutes total.</p>
 
@@ -586,6 +600,16 @@ const openThesis = async (thesisId) => {
   <span class="badge post">POST</span> /auth/register &nbsp;&nbsp;
   <span class="badge post">POST</span> /auth/login
 </div>
+<h3 class="subsub">Who can see which items — one rule, applied everywhere</h3>
+<p>Every thesis has a status, and the API decides what to return from the caller alone. The frontend does not need to filter anything itself, and should not try to.</p>
+<table class="doc-table">
+  <tr><th>Caller</th><th>Can see</th></tr>
+  <tr><td>Guest (not signed in)</td><td><code>active</code> only</td></tr>
+  <tr><td>Student / Teacher</td><td><code>active</code> + <code>restricted</code></td></tr>
+  <tr><td>Staff / Super Admin</td><td><code>active</code> + <code>restricted</code> + <code>archived</code></td></tr>
+</table>
+<p style="font-size:11px; color:#718096;">This applies to both <code>GET /theses</code> and <code>GET /theses/{id}</code>, and it also governs <code>?status=</code>: asking for a status you are not allowed to see returns <b>nothing</b>, rather than the rule being skipped. Two bugs here were fixed on 2026-09-22 — <code>?status=archived</code> used to be honoured for anyone including guests, and archived items were hidden from staff too, which made the Edit screen fail to open for anything archived.</p>
+
 <p style="font-size:11px; color:#718096;"><code>/auth/register/verify</code> is step one of registration — it checks an ID number against the school's records before the sign-up form asks for anything else. See section 5.4.</p>
 
 <h2 class="sub">8.2 Protected endpoints — all logged-in users</h2>
