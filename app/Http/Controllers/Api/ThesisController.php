@@ -82,6 +82,30 @@ class ThesisController extends Controller
         }
     }
 
+    /**
+     * Which thesis states this viewer is allowed to see at all.
+     *
+     * One definition, used by both the list and the single-item view, because
+     * they previously disagreed in both directions: the list let ANY caller ask
+     * for `?status=archived` and got it (so a guest could read the titles of
+     * archived work, and would equally have seen restricted items, which the
+     * system promises are for signed-in users only), while the single-item view
+     * hid archived records from staff as well - leaving Collection Management
+     * offering an Edit action that opened a broken screen.
+     *
+     * Guests see published work. Signed-in readers additionally see restricted
+     * work. Staff and Super Admins also see archived work, because managing it
+     * is their job.
+     */
+    private function visibleStatusesFor($user): array
+    {
+        if ($user && ($user->isStaff() || $user->isSuperAdmin())) {
+            return ['active', 'restricted', 'archived'];
+        }
+
+        return $user ? ['active', 'restricted'] : ['active'];
+    }
+
     // Public — guests can see the list but not open documents
     public function index(Request $request)
     {
@@ -91,7 +115,15 @@ class ThesisController extends Controller
         // This route has no auth:sanctum middleware, so the default guard
         // stays 'web' — the 'sanctum' guard must be asked for explicitly.
         $user = $request->user('sanctum');
-        $defaultStatuses = $user ? ['active', 'restricted'] : ['active'];
+        $defaultStatuses = $this->visibleStatusesFor($user);
+
+        // A requested status the viewer may not see returns NOTHING, rather
+        // than quietly ignoring the rule. `?status=` used to be applied
+        // verbatim, so `?status=archived` served archived work to anyone who
+        // typed it into the address bar.
+        $requestedStatuses = $request->status
+            ? array_values(array_intersect([$request->status], $defaultStatuses))
+            : $defaultStatuses;
 
         $theses = Thesis::with('category', 'uploader')
             // Browse/Collection Management sort by and display this — a
@@ -104,9 +136,7 @@ class ThesisController extends Controller
             // Named to match show()'s existing bookmark_count rather than
             // inventing a second spelling for one number.
             ->withCount(['readingHistory as views_count', 'favorites as bookmark_count'])
-            ->when($request->status,
-                fn($q) => $q->where('status', $request->status),
-                fn($q) => $q->whereIn('status', $defaultStatuses))
+            ->whereIn('status', $requestedStatuses)
             ->when($request->category_id, fn($q) =>
                 $q->where('category_id', $request->category_id))
             ->when($request->year_published, fn($q) =>
@@ -139,14 +169,20 @@ class ThesisController extends Controller
     // Public — basic info only, no file access
     public function show(Request $request, $id)
     {
-        // Same visibility rule as index(): restricted is visible to any
-        // logged-in user, hidden entirely from guests.
+        // Same rule as index(), from the same place.
         $user = $request->user('sanctum');
-        $visibleStatuses = $user ? ['active', 'restricted'] : ['active'];
+        $visibleStatuses = $this->visibleStatusesFor($user);
 
         $thesis = Thesis::with('category', 'uploader', 'citations')
             ->whereIn('status', $visibleStatuses)
-            ->findOrFail($id);
+            ->find($id);
+
+        // find() + abort(), not findOrFail(): the framework's own message is
+        // "No query results for model [App\Models\Thesis] 56", which was being
+        // shown to staff on screen.
+        if (! $thesis) {
+            abort(404, 'That item is not available.');
+        }
 
         $related = $this->findRelatedTheses($thesis, $visibleStatuses);
 

@@ -141,4 +141,104 @@ class ThesisVisibilityTest extends TestCase
         // Widen the window and the older active thesis joins it — still no archived.
         $this->assertSame(2, $this->getJson('/api/theses?added_within_days=365')->assertOk()->json('total'));
     }
+
+    // ---------------------------------------------------------------------
+    // Asking for a status directly.
+    //
+    // `?status=` used to be applied verbatim, so the rules above could be
+    // stepped around by anyone who typed a status into the address bar.
+    // ---------------------------------------------------------------------
+
+    public function test_a_guest_cannot_reach_archived_theses_by_asking_for_them(): void
+    {
+        $this->makeThesis('active');
+        $this->makeThesis('archived');
+
+        $this->assertSame(0, $this->getJson('/api/theses?status=archived')->assertOk()->json('total'));
+    }
+
+    /** The same hole exposed restricted theses, which are for members only. */
+    public function test_a_guest_cannot_reach_restricted_theses_by_asking_for_them(): void
+    {
+        $this->makeThesis('restricted');
+
+        $this->assertSame(0, $this->getJson('/api/theses?status=restricted')->assertOk()->json('total'));
+    }
+
+    public function test_a_reader_cannot_reach_archived_theses_by_asking_for_them(): void
+    {
+        $this->makeThesis('archived');
+
+        $this->assertSame(0, $this->actingAs($this->student(), 'sanctum')
+            ->getJson('/api/theses?status=archived')->assertOk()->json('total'));
+    }
+
+    public function test_staff_can_list_archived_theses_because_managing_them_is_their_job(): void
+    {
+        $this->makeThesis('active');
+        $this->makeThesis('archived');
+
+        $this->assertSame(1, $this->actingAs($this->uploader, 'sanctum')
+            ->getJson('/api/theses?status=archived')->assertOk()->json('total'));
+    }
+
+    // ---------------------------------------------------------------------
+    // Opening an archived thesis.
+    //
+    // Archived theses were hidden from staff as well as readers, so Collection
+    // Management offered an Edit action that opened a broken screen.
+    // ---------------------------------------------------------------------
+
+    public function test_staff_can_open_an_archived_thesis(): void
+    {
+        $archived = $this->makeThesis('archived');
+
+        $this->actingAs($this->uploader, 'sanctum')
+            ->getJson("/api/theses/{$archived->id}")
+            ->assertOk()
+            ->assertJsonPath('thesis.status', 'archived');
+    }
+
+    public function test_a_super_admin_can_open_an_archived_thesis(): void
+    {
+        Role::findOrCreate('super_admin');
+        $admin = User::factory()->create(['role' => 'super_admin']);
+        $admin->assignRole('super_admin');
+
+        $archived = $this->makeThesis('archived');
+
+        $this->actingAs($admin, 'sanctum')->getJson("/api/theses/{$archived->id}")->assertOk();
+    }
+
+    public function test_a_reader_cannot_open_an_archived_thesis(): void
+    {
+        $archived = $this->makeThesis('archived');
+
+        $this->actingAs($this->student(), 'sanctum')
+            ->getJson("/api/theses/{$archived->id}")
+            ->assertStatus(404);
+    }
+
+    public function test_a_guest_cannot_open_an_archived_thesis(): void
+    {
+        $archived = $this->makeThesis('archived');
+
+        $this->getJson("/api/theses/{$archived->id}")->assertStatus(404);
+    }
+
+    /**
+     * The refusal must not leak the framework's own wording. Staff opening an
+     * archived item were shown "No query results for model [App\Models\Thesis]
+     * 56" on screen, above an empty form.
+     */
+    public function test_an_unavailable_thesis_does_not_leak_the_internal_error(): void
+    {
+        $archived = $this->makeThesis('archived');
+
+        $message = (string) $this->getJson("/api/theses/{$archived->id}")->json('message');
+
+        $this->assertStringNotContainsString('No query results', $message);
+        $this->assertStringNotContainsString('App\Models', $message);
+        $this->assertSame('That item is not available.', $message);
+    }
 }
