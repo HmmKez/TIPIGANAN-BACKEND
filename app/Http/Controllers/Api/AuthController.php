@@ -37,6 +37,23 @@ class AuthController extends Controller
     }
 
     /**
+     * Tells the registration page which form to show.
+     *
+     * With directory verification switched off - the default, and the state
+     * until the school's records are available - the page shows the original
+     * single-step form. Only when verification is on does it split into
+     * "check the ID first, then set up the account". Without this, the page
+     * showed the two-step form unconditionally, making every registrant click
+     * through a check that verified nothing.
+     */
+    public function registrationOptions(SchoolDirectory $directory)
+    {
+        return response()->json([
+            'verification_required' => $directory->isEnabled(),
+        ]);
+    }
+
+    /**
      * Step one of registration: confirm the ID number belongs to a real,
      * currently-enrolled student or a current member of faculty.
      *

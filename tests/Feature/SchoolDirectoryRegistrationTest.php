@@ -234,6 +234,29 @@ class SchoolDirectoryRegistrationTest extends TestCase
         $this->assertDatabaseHas('users', ['id_number' => '77777', 'role' => 'teacher']);
     }
 
+    /**
+     * The registration page asks this before showing anything, and shows the
+     * original single-step form unless verification is on. Getting it wrong in
+     * the "off" direction is the costly one: the page would make every
+     * registrant pass a check that checks nothing.
+     */
+    public function test_registration_options_report_verification_off_by_default(): void
+    {
+        config(['school.directory.driver' => 'off']);
+
+        $this->getJson('/api/auth/register/options')
+            ->assertStatus(200)
+            ->assertExactJson(['verification_required' => false]);
+    }
+
+    public function test_registration_options_report_verification_on_when_enabled(): void
+    {
+        // setUp() already switched the driver to `fake`.
+        $this->getJson('/api/auth/register/options')
+            ->assertStatus(200)
+            ->assertExactJson(['verification_required' => true]);
+    }
+
     public function test_verify_tells_the_frontend_when_verification_is_switched_off(): void
     {
         config(['school.directory.driver' => 'off']);

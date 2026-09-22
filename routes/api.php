@@ -25,6 +25,11 @@ Route::middleware('throttle:api')->group(function () {
 
 // Public routes
 Route::prefix('auth')->group(function () {
+    // Which registration form to show. Read on every visit to the sign-up
+    // page and reveals nothing about any account, so it sits outside the
+    // strict auth limiter.
+    Route::get('/register/options', [AuthController::class, 'registrationOptions']);
+
     Route::middleware('throttle:auth')->group(function () {
         // Step one of registration: check the ID number against the school's
         // records before asking for anything else. Its own per-IP ceiling lives
