@@ -129,6 +129,36 @@ if (Test-Port 6379) {
     Write-Line 'Memurai' 'down' 'needs an ELEVATED prompt: Start-Service Memurai'
 }
 
+# --- Queue worker (only when the queue is a real one) -----------------------
+# On QUEUE_CONNECTION=sync, documents are read during the upload request and no
+# worker exists or is wanted. On `database`, nothing reads them without this
+# process - and the only sign of its absence is a warning on the edit screen,
+# so it is reported here too.
+$envFile = Join-Path (Split-Path $PSScriptRoot) '.env'
+$queue = if (Test-Path $envFile) {
+    ((Select-String -Path $envFile -Pattern '^QUEUE_CONNECTION=(.*)$').Matches.Groups[1].Value).Trim()
+} else { 'sync' }
+
+$worker = Get-CimInstance Win32_Process -Filter "Name = 'php.exe'" -ErrorAction SilentlyContinue |
+          Where-Object { $_.CommandLine -match 'queue:work' }
+
+if ($queue -eq 'sync') {
+    Write-Line 'Queue worker' 'not needed' 'QUEUE_CONNECTION=sync - documents read during upload'
+} elseif ($worker) {
+    Write-Line 'Queue worker' 'running' "pid $($worker.ProcessId)"
+} elseif ($Status) {
+    Write-Line 'Queue worker' 'DOWN' 'uploaded documents will NOT be read until started'
+} else {
+    Start-Process -FilePath 'php' `
+        -ArgumentList 'artisan', 'queue:work', '--tries=1', '--timeout=900' `
+        -WorkingDirectory (Split-Path $PSScriptRoot) -WindowStyle Hidden
+    Start-Sleep -Seconds 2
+    $worker = Get-CimInstance Win32_Process -Filter "Name = 'php.exe'" -ErrorAction SilentlyContinue |
+              Where-Object { $_.CommandLine -match 'queue:work' }
+    if ($worker) { Write-Line 'Queue worker' 'started' 'reads uploaded documents in the background' }
+    else { Write-Line 'Queue worker' 'DOWN' 'failed to start - run: php artisan queue:work' }
+}
+
 Write-Host ('-' * 62) -ForegroundColor DarkGray
 
 if (-not $isAdmin -and -not (Test-Port 6379) -and $memurai) {

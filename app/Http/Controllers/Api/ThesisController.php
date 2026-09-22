@@ -483,13 +483,19 @@ class ThesisController extends Controller
             'cover_image_path'=> $coverPath,
             'status'          => 'active',
             'uploaded_by'     => $request->user()->id,
+            // Reading the document has not started yet. On the `sync` queue it
+            // finishes before this request returns; on a worker it may take
+            // minutes, which is what the upload screen watches.
+            'ocr_status'      => 'pending',
         ]));
 
         $this->syncSearchable($thesis);
 
-        // Dispatch OCR job to run in background
-        ProcessThesisOcr::dispatch($thesis);
-
+        // Recorded BEFORE the OCR job is dispatched, deliberately. With OCR
+        // running inline this line came after it, so anything that killed the
+        // OCR - a crash, or a gateway timeout on a long scan - left a thesis in
+        // the repository with no entry in the audit trail. The upload is a fact
+        // the moment the record exists; reading the document is not.
         AuditLog::create([
             'user_id'     => $request->user()->id,
             'action'      => 'upload_thesis',
@@ -498,6 +504,15 @@ class ThesisController extends Controller
             'description' => "{$request->user()->display_name} uploaded thesis: {$thesis->title}",
             'ip_address'  => $request->ip(),
         ]);
+
+        // Queued when QUEUE_CONNECTION is a real queue; run inline on `sync`,
+        // which stays the default so the system still works with no worker.
+        ProcessThesisOcr::dispatch($thesis);
+
+        // The job writes to the row directly, so this in-memory copy still says
+        // 'pending'. Refresh, or a sync upload would tell the screen to wait for
+        // work that has in fact already finished.
+        $thesis->refresh();
 
         // Added as an attribute rather than wrapping the response in a new
         // envelope, so existing callers reading the thesis fields directly

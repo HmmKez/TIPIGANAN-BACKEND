@@ -14,7 +14,13 @@ class Thesis extends Model
         'title', 'authors', 'adviser', 'abstract', 'keywords',
         'year_published', 'category_id', 'pages', 'file_path', 'checksum',
         'cover_image_path', 'status', 'uploaded_by',
+        'ocr_status', 'ocr_completed_at',
     ];
+
+    protected function casts(): array
+    {
+        return ['ocr_completed_at' => 'datetime'];
+    }
 
     public function toSearchableArray(): array
     {
