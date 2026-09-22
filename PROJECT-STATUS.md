@@ -40,8 +40,12 @@
 > `TIPIGANAN-System-Functionalities.pdf` (`docs:features`). All three are generated — never edit
 > the PDF, edit its Blade template and re-run the command.
 > The capstone write-up is the exception: it is authored prose and cannot be regenerated.
-> **CURRENT (2026-09-18): the team's live draft is `Desktop\CAPSTONE-3 CURRENT PROGRESS.docx`, and its
-> review copy is `Desktop\CAPSTONE-3 CURRENT PROGRESS - REVIEWED.docx` — 43 highlighted findings,
+> **CURRENT (2026-09-22): the team's live draft is `Desktop\CAPSTONE\CAPSTONE-GROUP7.docx`, and its
+> review copy is `Desktop\CAPSTONE\CAPSTONE-GROUP7 - REVIEWED.docx` — 18 highlighted findings.**
+> The team applied most of the previous round; see §3, "CAPSTONE-GROUP7 reviewed", for what they
+> fixed and what is still outstanding.
+> Superseded: `Desktop\CAPSTONE-3 CURRENT PROGRESS.docx` and its
+> review copy `Desktop\CAPSTONE-3 CURRENT PROGRESS - REVIEWED.docx` — 43 highlighted findings,
 > each with a comment tagged [HIGH] / [MEDIUM] / [MISSING] / [MINOR], weighted toward Chapters IV–V.**
 > The older `CAPSTONE\CAPSTONE-3 (1) - REVIEWED*.docx` files reviewed an earlier draft and are superseded.
 > See §3, "Capstone draft reviewed against the system", for how it was checked and the rules it follows.
@@ -919,6 +923,13 @@ So the suite passed or failed depending on **whether anyone had hit the dev serv
 **Regression test** (`AuthTest`, 80 → 81): plants a foreign breaker flag and asserts login still throttles. Getting this test *right* took two attempts and the correction is the point — the first version created only the new environment-scoped filename, which the broken code never read, so it **passed against the bug**. It now plants the un-scoped legacy name as well, and is confirmed to fail (`429` expected, `200` received) against the old code. The cleanup only removes flags the test itself created, so it can't delete a breaker the dev server is relying on.
 
 **Verified** by running the full suite twice with the dev breaker deliberately tripped in between: 81/81 both times.
+
+### CAPSTONE-GROUP7 reviewed — the team's second draft (2026-09-22)
+`Desktop\CAPSTONE\CAPSTONE-GROUP7.docx` (1,083 paragraphs, up from 993) is the successor to `CAPSTONE-3 CURRENT PROGRESS.docx`. Reviewed the same way — text diffed paragraph-by-paragraph against the previous draft, every claim re-checked against code, and all 23 figures extracted and compared byte-for-byte with the old ones. Output: **`CAPSTONE-GROUP7 - REVIEWED.docx`, 18 findings**, original untouched.
+- **They applied most of the previous round, and it shows.** Fixed: the five-types-listed-as-four count; "password encryption" → hashing; "manual and scheduled backup" → automated daily backups; the watermark wording (now "name or ID number"); the Redis description (report statistics, category list, landing page, failed-login counts — not search results); the PDF.js description (server stamps the seal, 30-minute link, viewer overlays identity); **Use Case 2 rewritten from the non-existent "Manage System & Data Security" into "Automated Maintenance" with the System Scheduler as actor and the four real scheduled tasks**; UC13's actor widened to all registered users; citations removed from "personal tools"; the Axios paragraph rewritten; the 2022 reference typo; §4.6 turned into a real seven-phase rollout plan; and the scan inbox + ID verification named in the scope. The CVs are in.
+- **Still outstanding (the 18 findings):** the data dictionary is untouched — `users.id` and `categories.id` still typed `char(5)`, no `id_number` row, `signed_url_tokens` still absent though it is in the ER diagram, "favorited" wording, enum values unlisted; no **Register Account** use case and no **File a Scanned Thesis** use case (the scope names the feature but no use case exists — an earlier grep false-matched the scope sentence, which is why this needed checking twice); the Chapter I staff-limitation overstatement; six missing technologies including **FPDI and Spatie Permission**, which implement two features the paper emphasises; and **Chapter VI recommendations still empty at "a."**.
+- **Chapter V is the weakest point and got worse by standing still.** **Verified: every screenshot is byte-for-byte identical to the previous draft** — the only new images are CV photos. They still show "Favorites", icon-only action buttons, the old name/department registration form, the old email login, and duplicated browse filters. A panelist comparing the paper with a live demo sees different software.
+- **Two counts have moved again since the draft was written:** the paper now says 132 tests (it was 81); the suite is **148**. And background reading of documents, built today, is not described anywhere — flagged with suggested wording.
 
 ### Thesis visibility: two opposite bugs in one missing rule (2026-09-22)
 Found during a pre-push "is everything functional" sweep, both **pre-existing**, neither introduced by the OCR work. `index()` and `show()` each decided visibility for themselves and disagreed in **opposite directions**.
