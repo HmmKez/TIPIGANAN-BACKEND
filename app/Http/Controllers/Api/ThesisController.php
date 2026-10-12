@@ -407,7 +407,9 @@ class ThesisController extends Controller
         $request->validate([
             'title'          => 'required|string',
             'authors'        => 'required|string',
-            'adviser'        => 'required|string',
+            // Optional: special collections and institutional publications
+            // usually have no adviser.
+            'adviser'        => 'nullable|string|max:255',
             // Left blank, either field is auto-filled from the uploaded
             // PDF's own Abstract/Keywords section by ProcessThesisOcr —
             // see its handle() for the fill-only-if-empty logic.
@@ -510,7 +512,9 @@ class ThesisController extends Controller
         $request->validate([
             'title'          => 'sometimes|string',
             'authors'        => 'sometimes|string',
-            'adviser'        => 'sometimes|string',
+            // nullable so it can be cleared (an empty box arrives as null via
+            // ConvertEmptyStringsToNull); the column is nullable since 2026-10-12.
+            'adviser'        => 'sometimes|nullable|string|max:255',
             // nullable so a cleared abstract (arrives as null via
             // ConvertEmptyStringsToNull) passes validation — it's coerced back
             // to '' below since the column is NOT NULL.
