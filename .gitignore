@@ -28,3 +28,5 @@ Homestead.yaml
 Thumbs.db
 npm-debug.log
 yarn-error.log
+# Meilisearch data directory, created if Meilisearch is ever started from this folder
+/data.ms/

@@ -175,7 +175,8 @@
   <li>Upload with full bibliographic metadata: title, author(s), adviser, year published, category/department, page count, abstract, keywords, cover image, and the PDF itself.</li>
   <li><b>Accepted files:</b> the collection document must be a <b>PDF</b>, up to <b>150&nbsp;MB</b> — large enough for a full high-resolution scan of a physical thesis. Cover images and profile pictures are limited to 2&nbsp;MB. Every upload is validated for both file type and size before it is accepted.</li>
   <li>Abstract and keywords may be left blank — the system extracts them automatically from the document's own Abstract/Keywords section (see 3.3), without ever overwriting anything a staff member typed.</li>
-  <li><b>Three-tier visibility:</b> <b>Active</b> (visible to everyone including guests), <b>Restricted</b> (visible to any logged-in college account, hidden from guests), and <b>Archived</b> (hidden from everyone but retrievable by staff).</li>
+  <li><b>Three-tier visibility:</b> <b>Active</b> (visible to everyone including guests), <b>Restricted</b> (visible to any logged-in college account, hidden from guests), and <b>Archived</b> (hidden from students, teachers and guests everywhere — browsing, search, the detail page and the reader — while staff can still find, open and read it).</li>
+  <li><b>Archiving deletes nothing.</b> The record, its document, version history, citations, view counts and readers' bookmarks are all kept, and restoring an item brings it back everywhere at once — including on the bookmarks of everyone who had saved it.</li>
   <li>Full metadata editing after upload, from a dedicated staff edit page.</li>
   <li><b>File replacement with version history.</b> Staff can swap a collection's PDF at any time (a wrong file, or a better scan). The previous file is not destroyed — it is archived and stays restorable for a configurable grace period (30 days by default), after which it is purged automatically. Any version can also be restored or permanently deleted early, on demand.</li>
   <li>Previous versions are listed with their file size, who replaced them, when, and how many days remain to restore — and each can be <b>previewed</b> before restoring, so staff can visually confirm which file is which.</li>
@@ -202,9 +203,10 @@
   <li>Full-text search across title, authors, adviser, abstract, and keywords — typo-tolerant and relevance-ranked.</li>
   <li>Search never goes fully down: if the dedicated search engine is unavailable, the system automatically falls back to a database search. Results still appear; only typo-tolerance and relevance ranking are temporarily lost.</li>
   <li>Filterable by department/category and year of publication; sortable by relevance, newest, or most-viewed, with paginated results.</li>
+  <li><b>Staff see every status, clearly marked.</b> For staff and administrators each result carries its status — Active, Restricted or Archived — and archived items are visibly greyed. A <b>Status</b> filter (all including archived, or one status only) applies to browsing and searching alike. Readers see none of this, and search applies exactly the same visibility rule as browsing.</li>
   <li>Suggested quick-search tags for common topics, giving a visitor with no specific query in mind a way into the collection.</li>
   <li>Browse organized by department/category with cover images and real per-item view counts.</li>
-  <li><b>Related collections</b> on each detail page, ranked by actual keyword and abstract overlap with the item being viewed — not merely "same category."</li>
+  <li><b>Related items</b> on each <b>Item Details</b> page, ranked by actual keyword and abstract overlap with the item being viewed — not merely "same category."</li>
   <li>A user's own recent searches feed their personal dashboard. These are private to that user and entirely distinct from the staff-only audit trail.</li>
 </ul>
 
@@ -213,7 +215,7 @@
   <li><b>View-only PDF viewer.</b> Documents are never offered as a direct download to readers. Access is granted through a short-lived signed link generated per viewing session.</li>
   <li><b>Per-page live watermarking.</b> Every page of a document a reader opens is stamped, at the moment of viewing, with the viewing account's name and email plus a timestamp. The watermark is never baked into the stored file — it is applied per request, per reader, so a screenshot of <i>any</i> page is traceable to the person who opened it.</li>
   <li>Auto-generated <b>APA and MLA citations</b> for every collection, editable in place by staff. Readers can copy either format, and copy events are logged (which powers the Most Cited report).</li>
-  <li>Bookmarking for any signed-in account, with bulk select/remove/export and cover thumbnails. A bookmark whose document was later deleted shows a clear "no longer available" placeholder and cleans itself up, instead of rendering a broken card.</li>
+  <li>Bookmarking for any signed-in account, with bulk select/remove/export and cover thumbnails. <b>A bookmark is never removed by the system:</b> if its item is archived it shows as "Currently unavailable", without revealing the item's details, and returns by itself when the item is restored; a deleted item shows "Removed from the repository".</li>
   <li>Personal reading history, and a "Continue Reading" list on the dashboard drawn from the account's <i>own</i> reads.</li>
 </ul>
 

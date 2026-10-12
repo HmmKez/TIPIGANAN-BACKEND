@@ -442,6 +442,7 @@ npm run dev  <span class="cm"># runs at http://localhost:5173</span></pre>
   <tr><td><code>SCAN_INBOX_PATH</code></td><td>The folder to watch. Blank uses <code>storage/app/scan-inbox</code> for local development. In production this points at the NAS share ScanSnap Home writes to. <b>Use forward slashes on Windows</b> — a backslash is an escape character to dotenv and breaks the whole file.</td></tr>
   <tr><td><code>SCAN_INBOX_SETTLE_SECONDS</code></td><td>How long a file must sit untouched before it is offered. Default 5. A scanner writing a large PDF leaves a file that exists but is not finished, and attaching one mid-write gives a corrupt document.</td></tr>
 </table>
+<p><b>Each waiting scan has a View button</b> that opens the PDF in a new tab, because scanner file names say nothing about which thesis is inside. <b>Discard always asks first</b>, on the app's own confirmation screen: it shows the file's name, size, page count and scan time, says plainly that the file cannot be recovered, and offers "View it first" without closing. The list sits in a fixed-height box that scrolls, newest first, so a backlog can never push the rest of the page off screen. The heading counts everything waiting; at most 100 are listed (<code>SCAN_INBOX_MAX_LISTED</code>), and past that it says "(showing the newest 100)". File extensions are matched regardless of case, so <code>SCAN001.PDF</code> is picked up too.</p>
 <p><b>To try it locally</b>, drop any PDF into <code>storage/app/scan-inbox</code> and open the Upload Item page — it appears in the list. Filing it moves the file into the repository and removes it from the folder, so the same scan cannot be filed twice by accident.</p>
 <p style="font-size:11px; color:#718096;"><b>An empty list and an unreachable folder are shown differently, and that distinction matters.</b> "No scans waiting" means the folder is fine and empty; "the scan folder cannot be reached" almost always means the NAS share is not mounted. Reporting the second as the first would send staff to check the scanner when the problem is the storage.</p>
 <p style="font-size:11px; color:#718096;">The filename in an import request comes from the browser, so <code>ScanInbox::resolve()</code> is the single place it is made safe — it strips any directory part and then checks the resolved path really is inside the inbox. <b>Any new method that accepts a filename must go through it.</b> There is a test that plants a real PDF outside the folder and proves it cannot be reached or deleted.</p>
@@ -582,6 +583,19 @@ const openThesis = async (thesisId) => {
   return res.data.token  <span class="cm">// use this token to load the PDF</span>
 }</pre>
 
+<h2 class="sub">7.3 Phones and tablets — two conventions for tables <span style="font-size:11px; background:#1e8a5f; color:#fff; padding:2px 8px;">NEW</span></h2>
+<p>Every screen is checked at 320, 360 and 375px wide. Tables need a little help, because a table that merely scrolls sideways inside its box never makes the <i>page</i> too wide — it just quietly hides its right-hand columns, including the Actions menu.</p>
+<p><b>On phones (below 640px), a table can turn each row into a card.</b> Add <code>stack-on-phone</code> to the table, then mark its cells:</p>
+<pre>&lt;table className="data-table stack-on-phone"&gt;
+  ...
+  &lt;td className="cell-primary"&gt;{title}&lt;/td&gt;          <span class="cm">// what the row IS — goes to the top, no label</span>
+  &lt;td data-label="Status"&gt;{status}&lt;/td&gt;             <span class="cm">// shown as "STATUS ........ value"</span>
+  &lt;td className="cell-block" data-label="Reason"&gt;   <span class="cm">// long text: label above, paragraph below</span>
+  &lt;td className="cell-select"&gt;&lt;input type="checkbox"/&gt;&lt;/td&gt;  <span class="cm">// corner checkbox</span>
+  &lt;td className="cell-actions"&gt;&lt;RowActions .../&gt;&lt;/td&gt;      <span class="cm">// goes to the bottom</span></pre>
+<p><b>On tablets and laptops, the <code>cell-actions</code> column is pinned</b> to the right edge, so it stays reachable while the rest of the row scrolls under it. Mark the Actions cell <code>cell-actions</code> and this happens on its own.</p>
+<p style="font-size:11px; color:#718096;">Two traps worth knowing. A CSS grid column written as <code>1fr</code> cannot shrink below its widest unbreakable text, so one long file name can widen a whole page on a phone — use <code>minmax(0, 1fr)</code>. And keep colour values as theme tokens (<code>var(--bg-card)</code>), never literals, or the element stops following dark mode.</p>
+
 <!-- ============ 8 (was 7) ============ -->
 <div class="page-break"></div>
 <h1 class="section">8. API Endpoint Reference</h1>
@@ -608,7 +622,7 @@ const openThesis = async (thesisId) => {
   <tr><td>Student / Teacher</td><td><code>active</code> + <code>restricted</code></td></tr>
   <tr><td>Staff / Super Admin</td><td><code>active</code> + <code>restricted</code> + <code>archived</code></td></tr>
 </table>
-<p style="font-size:11px; color:#718096;">This applies to both <code>GET /theses</code> and <code>GET /theses/{id}</code>, and it also governs <code>?status=</code>: asking for a status you are not allowed to see returns <b>nothing</b>, rather than the rule being skipped. Two bugs here were fixed on 2026-09-22 — <code>?status=archived</code> used to be honoured for anyone including guests, and archived items were hidden from staff too, which made the Edit screen fail to open for anything archived.</p>
+<p style="font-size:11px; color:#718096;">The rule lives in one place, <code>Thesis::visibleStatusesFor()</code>, and applies to <code>GET /theses</code>, <code>GET /theses/{id}</code>, <code>GET /search</code> and <b>reading the PDF</b> (<code>POST /theses/{id}/view-token</code>) — so staff can read an archived thesis, and nobody else can. It also governs <code>?status=</code> on both the list and search: asking for a status you are not allowed to see returns <b>nothing</b>, rather than the rule being skipped. Browse's <b>Status</b> filter (staff and super admin only) is this parameter. Two bugs here were fixed on 2026-09-22 — <code>?status=archived</code> used to be honoured for anyone including guests, and archived items were hidden from staff too, which made the Edit screen fail to open for anything archived. On 2026-10-07 search and reading were brought under the same rule, and a leak was closed: the Archive button did not update the search index, so <b>guests could still find archived work by searching</b>. Search now also re-checks each result's status against the database, so a stale index can no longer show anything it shouldn't. If Meilisearch has been reset or was down while items changed, rebuild it: <code>php artisan scout:sync-index-settings</code> then <code>php artisan scout:import "App\Models\Thesis"</code>.</p>
 
 <p style="font-size:11px; color:#718096;"><code>/auth/register/verify</code> is step one of registration — it checks an ID number against the school's records before the sign-up form asks for anything else. See section 5.4.</p>
 
