@@ -44,10 +44,42 @@ class ScanInboxController extends Controller
             ]);
         }
 
+        $listing = $this->inbox->listing();
+
         return response()->json([
             'enabled'   => true,
             'available' => true,
-            'files'     => $this->inbox->files(),
+            // Everything waiting, not just what is listed - the screen shows
+            // "N waiting, showing the newest 100" when they differ.
+            'total'     => $listing['total'],
+            'files'     => $listing['files'],
+        ]);
+    }
+
+    /**
+     * Open a waiting scan so staff can see which one it is before filing it.
+     *
+     * File names straight off a scanner ("Scan_2026-10-06_0914.pdf") say
+     * nothing about which thesis is inside, and with several waiting there is
+     * no other way to tell them apart.
+     *
+     * The name arrives from the browser, so it goes through resolve() - the
+     * single place a requested name is made safe - and only a PDF inside the
+     * inbox can ever be served. Inline rather than as a download: staff are
+     * looking, not taking a copy.
+     */
+    public function preview(string $name)
+    {
+        try {
+            $absolute = $this->inbox->resolve($name);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 404);
+        }
+
+        return response()->file($absolute, [
+            'Content-Type'        => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="'.str_replace('"', '', basename($absolute)).'"',
+            'Cache-Control'       => 'no-store, no-cache',
         ]);
     }
 

@@ -341,4 +341,120 @@ class ScanInboxTest extends TestCase
             ->assertStatus(422)
             ->assertJsonValidationErrors('pdf_file');
     }
+
+    // ------------------------------------------------------------ the count
+
+    /**
+     * The screen used to count the rows it was sent, so with 150 scans waiting
+     * and a cap of 100 it announced "100 scanned files waiting". The real total
+     * is now reported separately from the listed files.
+     */
+    public function test_the_total_counts_everything_waiting_not_just_what_is_listed(): void
+    {
+        config(['scanner.inbox.max_listed' => 2]);
+
+        foreach (range(1, 5) as $n) {
+            touch($this->putScan("scan-{$n}.pdf"), time() - (100 - $n));
+        }
+
+        $this->actingAs($this->staff())
+            ->getJson('/api/scan-inbox')
+            ->assertStatus(200)
+            ->assertJsonPath('total', 5)
+            ->assertJsonCount(2, 'files')
+            // Newest first, so the scan just made is at the top of the list.
+            ->assertJsonPath('files.0.name', 'scan-5.pdf')
+            ->assertJsonPath('files.1.name', 'scan-4.pdf');
+    }
+
+    /**
+     * Upper-case extensions are common from scanners. The listing used a
+     * '*.pdf' glob, and PHP's glob is case-sensitive on Windows as well as
+     * Linux, so SCAN001.PDF was invisible everywhere, silently. Confirmed to
+     * fail against that glob.
+     */
+    public function test_an_upper_case_pdf_extension_is_still_listed(): void
+    {
+        $this->putScan('SCAN001.PDF');
+
+        $this->actingAs($this->staff())
+            ->getJson('/api/scan-inbox')
+            ->assertStatus(200)
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('files.0.name', 'SCAN001.PDF');
+    }
+
+    // ------------------------------------------------------------ previewing
+
+    public function test_staff_can_open_a_waiting_scan_to_see_which_one_it_is(): void
+    {
+        $path = $this->putScan('which-one-is-this.pdf');
+
+        $response = $this->actingAs($this->staff())
+            ->get('/api/scan-inbox/which-one-is-this.pdf/preview')
+            ->assertStatus(200)
+            ->assertHeader('Content-Type', 'application/pdf');
+
+        // Opened in the browser, not downloaded: staff are looking, not copying.
+        $this->assertStringStartsWith('inline', $response->headers->get('Content-Disposition'));
+        $this->assertSame(file_get_contents($path), $response->streamedContent());
+    }
+
+    public function test_a_student_cannot_open_a_waiting_scan(): void
+    {
+        $this->putScan('private-scan.pdf');
+
+        $this->actingAs($this->student())
+            ->getJson('/api/scan-inbox/private-scan.pdf/preview')
+            ->assertStatus(403);
+    }
+
+    public function test_previewing_a_scan_that_is_not_there_is_a_clean_404(): void
+    {
+        $this->actingAs($this->staff())
+            ->getJson('/api/scan-inbox/never-existed.pdf/preview')
+            ->assertStatus(404);
+    }
+
+    /**
+     * The name comes from the browser. Previewing serves file CONTENTS, which
+     * makes an escape from the folder worse here than anywhere else in the
+     * inbox - so this uses a real PDF really sitting outside it. A traversal
+     * test aimed at a file that does not exist passes against unsafe code and
+     * proves nothing; that has already happened once in this project.
+     */
+    public function test_preview_cannot_be_used_to_read_a_file_outside_the_inbox(): void
+    {
+        $outsideDir = dirname($this->inboxPath).DIRECTORY_SEPARATOR.'outside-'.uniqid();
+        mkdir($outsideDir, 0777, true);
+        file_put_contents($outsideDir.DIRECTORY_SEPARATOR.'confidential.pdf', "%PDF-1.4\n% not yours\n%%EOF\n");
+
+        try {
+            $staff = $this->staff();
+
+            foreach (['..%2F'.basename($outsideDir).'%2Fconfidential.pdf',
+                      '..%5C'.basename($outsideDir).'%5Cconfidential.pdf'] as $attempt) {
+                $response = $this->actingAs($staff)->get("/api/scan-inbox/{$attempt}/preview");
+
+                $this->assertNotSame(200, $response->status(), "Preview served a file outside the inbox via '{$attempt}'.");
+                $this->assertStringNotContainsString('not yours', (string) $response->getContent());
+            }
+
+            // The route's own pattern already rejects a slash, so the requests
+            // above may never reach preview() at all - and would keep passing
+            // even if preview() stopped checking names. Calling it directly is
+            // what proves preview() itself refuses, independent of routing.
+            $controller = app(\App\Http\Controllers\Api\ScanInboxController::class);
+
+            foreach (['../'.basename($outsideDir).'/confidential.pdf',
+                      '..\\'.basename($outsideDir).'\\confidential.pdf'] as $attempt) {
+                $direct = $controller->preview($attempt);
+
+                $this->assertSame(404, $direct->getStatusCode(), "preview() itself served '{$attempt}'.");
+            }
+        } finally {
+            @unlink($outsideDir.DIRECTORY_SEPARATOR.'confidential.pdf');
+            @rmdir($outsideDir);
+        }
+    }
 }

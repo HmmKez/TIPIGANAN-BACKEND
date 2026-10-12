@@ -48,24 +48,49 @@ class ScanInbox
     /**
      * Files that are ready to be attached, newest first.
      *
-     * Skips anything written too recently: a scanner producing a large PDF
-     * leaves a file that exists but is not finished, and attaching one
-     * mid-write yields a corrupt document.
-     *
      * @return array<int, array{name:string, size:int, scanned_at:string, pages:?int}>
      */
     public function files(): array
     {
+        return $this->listing()['files'];
+    }
+
+    /**
+     * What is waiting, and how much of it is being shown.
+     *
+     * `total` is every file ready to attach; `files` is the newest of them, up
+     * to `max_listed`. They are reported separately because the screen used to
+     * count the rows it was sent, so with 150 scans waiting it announced 100.
+     *
+     * Skips anything written too recently: a scanner producing a large PDF
+     * leaves a file that exists but is not finished, and attaching one
+     * mid-write yields a corrupt document.
+     *
+     * The page count - the only expensive part, since it reads up to 2 MB of
+     * each file - is worked out AFTER the cap is applied, for the listed files
+     * only. It used to be computed for every file in the folder before the cap,
+     * so a backlog of 500 scans meant reading up to a gigabyte of PDFs on every
+     * page load just to display the first 100.
+     *
+     * @return array{total:int, files:array<int, array{name:string, size:int, scanned_at:string, pages:?int}>}
+     */
+    public function listing(): array
+    {
         if (! $this->enabled() || ! $this->exists()) {
-            return [];
+            return ['total' => 0, 'files' => []];
         }
 
         $settle = (int) config('scanner.inbox.settle_seconds');
         $cutoff = time() - max(0, $settle);
-        $found  = [];
+        $ready  = [];
 
-        foreach ((array) glob($this->path().DIRECTORY_SEPARATOR.'*.pdf', GLOB_NOSORT) as $absolute) {
-            if (! is_file($absolute)) {
+        // Every entry, filtered by extension here rather than by a '*.pdf'
+        // glob. PHP's glob is case-sensitive - verified on Windows as well as
+        // Linux, despite the Windows filesystem itself ignoring case - so a
+        // scanner that names its files SCAN001.PDF produced an empty inbox
+        // with no error, on every machine.
+        foreach ((array) glob($this->path().DIRECTORY_SEPARATOR.'*', GLOB_NOSORT) as $absolute) {
+            if (! is_file($absolute) || strtolower(pathinfo($absolute, PATHINFO_EXTENSION)) !== 'pdf') {
                 continue;
             }
 
@@ -75,24 +100,24 @@ class ScanInbox
                 continue; // still being written
             }
 
-            $found[] = [
-                'name'       => basename($absolute),
-                'size'       => (int) @filesize($absolute),
-                'scanned_at' => date(DATE_ATOM, $modified),
-                'pages'      => $this->countPages($absolute),
-                '_sort'      => $modified,
-            ];
+            // Only cheap facts here: name, size and time come from the
+            // directory entry, so this stays fast however full the folder is.
+            $ready[] = ['absolute' => $absolute, 'modified' => $modified];
         }
 
-        usort($found, fn ($a, $b) => $b['_sort'] <=> $a['_sort']);
+        usort($ready, fn ($a, $b) => $b['modified'] <=> $a['modified']);
 
-        $found = array_slice($found, 0, max(1, (int) config('scanner.inbox.max_listed')));
+        $shown = array_slice($ready, 0, max(1, (int) config('scanner.inbox.max_listed')));
 
-        return array_map(function ($file) {
-            unset($file['_sort']);
-
-            return $file;
-        }, $found);
+        return [
+            'total' => count($ready),
+            'files' => array_map(fn ($entry) => [
+                'name'       => basename($entry['absolute']),
+                'size'       => (int) @filesize($entry['absolute']),
+                'scanned_at' => date(DATE_ATOM, $entry['modified']),
+                'pages'      => $this->countPages($entry['absolute']),
+            ], $shown),
+        ];
     }
 
     /**

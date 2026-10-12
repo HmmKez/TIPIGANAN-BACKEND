@@ -175,6 +175,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // `{name}` is constrained to a filename because the default pattern
         // would let a slash through and turn it into a path.
         Route::get('/scan-inbox',               [ScanInboxController::class, 'index']);
+        Route::get('/scan-inbox/{name}/preview', [ScanInboxController::class, 'preview'])
+            ->where('name', '[^/\\\\]+');
         Route::delete('/scan-inbox/{name}',     [ScanInboxController::class, 'destroy'])
             ->where('name', '[^/\\\\]+');
 
