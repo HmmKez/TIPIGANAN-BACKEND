@@ -241,4 +241,83 @@ class ThesisVisibilityTest extends TestCase
         $this->assertStringNotContainsString('App\Models', $message);
         $this->assertSame('That item is not available.', $message);
     }
+
+    // ---------------------------------------------------------------------
+    // Search follows the same rule.
+    //
+    // SearchService hard-coded active/restricted for everyone, so staff saw an
+    // archived item while browsing and lost it the moment they typed a search.
+    // ---------------------------------------------------------------------
+
+    private function searchStatuses($as, string $query = 'Thesis'): array
+    {
+        $request = $as ? $this->actingAs($as, 'sanctum') : $this;
+
+        return collect($request->getJson('/api/search?' . $query)->assertOk()->json('data'))
+            ->pluck('status')->sort()->values()->all();
+    }
+
+    public function test_staff_search_includes_archived_theses(): void
+    {
+        $this->makeThesis('active');
+        $this->makeThesis('restricted');
+        $this->makeThesis('archived');
+
+        $this->assertSame(['active', 'archived', 'restricted'], $this->searchStatuses($this->uploader, 'q=Thesis'));
+    }
+
+    public function test_reader_and_guest_search_never_include_archived_theses(): void
+    {
+        $this->makeThesis('active');
+        $this->makeThesis('restricted');
+        $this->makeThesis('archived');
+
+        // Guest first: once actingAs() has run, every later request in this
+        // test is signed in, so a "guest" check after it would test nothing.
+        $this->assertSame(['active'], $this->searchStatuses(null, 'q=Thesis'));
+        $this->assertSame(['active', 'restricted'], $this->searchStatuses($this->student(), 'q=Thesis'));
+    }
+
+    public function test_staff_can_narrow_a_search_to_one_status(): void
+    {
+        $this->makeThesis('active');
+        $this->makeThesis('archived');
+
+        $this->assertSame(['archived'], $this->searchStatuses($this->uploader, 'q=Thesis&status=archived'));
+        $this->assertSame(['active'], $this->searchStatuses($this->uploader, 'q=Thesis&status=active'));
+    }
+
+    public function test_a_guest_cannot_reach_archived_theses_by_asking_search_for_them(): void
+    {
+        $this->makeThesis('archived');
+
+        // Guest first, for the same reason as above.
+        $this->assertSame([], $this->searchStatuses(null, 'q=Thesis&status=archived'));
+        $this->assertSame([], $this->searchStatuses($this->student(), 'q=Thesis&status=archived'));
+    }
+
+    // ---------------------------------------------------------------------
+    // Reading an archived thesis.
+    //
+    // The PDF token hard-coded active/restricted, so staff could open an
+    // archived item's page but got a 404 the moment they pressed Read.
+    // ---------------------------------------------------------------------
+
+    public function test_staff_can_read_an_archived_thesis(): void
+    {
+        $archived = $this->makeThesis('archived');
+
+        $this->actingAs($this->uploader, 'sanctum')
+            ->postJson("/api/theses/{$archived->id}/view-token")
+            ->assertOk();
+    }
+
+    public function test_a_reader_cannot_read_an_archived_thesis(): void
+    {
+        $archived = $this->makeThesis('archived');
+
+        $this->actingAs($this->student(), 'sanctum')
+            ->postJson("/api/theses/{$archived->id}/view-token")
+            ->assertNotFound();
+    }
 }

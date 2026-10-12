@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
+use App\Models\Thesis;
 use App\Services\SearchService;
 use Illuminate\Http\Request;
 
@@ -17,6 +18,7 @@ class SearchController extends Controller
             'q'              => 'required|string|min:1',
             'category_id'    => 'nullable|exists:categories,id',
             'year_published' => 'nullable|digits:4|integer',
+            'status'         => 'nullable|in:active,restricted,archived',
         ]);
 
         // This route has no auth:sanctum middleware (guests can search too),
@@ -25,10 +27,13 @@ class SearchController extends Controller
         // Asking for the 'sanctum' guard explicitly resolves it regardless.
         $user = $request->user('sanctum');
 
+        // Same visibility rule as browsing (Thesis::visibleStatusesFor), and
+        // the same ?status= narrowing: staff can search archived work too, or
+        // only one status. A status the caller may not see returns nothing.
         $results = $this->searchService->search(
             $request->input('q'),
             $request->only(['category_id', 'year_published']),
-            (bool) $user
+            Thesis::statusesRequestedBy($user, $request->input('status'))
         );
 
         // Log the search activity — audit_logs.user_id is nullable specifically

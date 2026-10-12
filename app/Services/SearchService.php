@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Thesis;
 use App\Support\SafeCache;
 use Exception;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -19,27 +20,34 @@ class SearchService
     // 0.5s is still generous for a real response and caps the worst case.
     protected float $timeout = 0.5;
 
-    // $includeRestricted: restricted theses are visible to any logged-in
-    // user but hidden from guests entirely — same rule as browsing.
-    public function search(string $query, array $filters = [], bool $includeRestricted = false)
+    // $statuses: which thesis states this caller may see, from
+    // Thesis::statusesRequestedBy — the same rule as browsing. Defaults to
+    // published work only, the guest view, so a caller that forgets to pass
+    // it shows less, never more.
+    public function search(string $query, array $filters = [], array $statuses = ['active'])
     {
+        // A status the caller may not see narrows to nothing. Answer that
+        // directly: an empty IN () is not a valid Meilisearch filter, and
+        // letting it fail would log a false "Meilisearch unavailable".
+        if (empty($statuses)) {
+            return new LengthAwarePaginator([], 0, 12);
+        }
+
         try {
-            return $this->searchWithMeilisearch($query, $filters, $includeRestricted);
+            return $this->searchWithMeilisearch($query, $filters, $statuses);
         } catch (Exception $e) {
             Log::warning('Meilisearch unavailable, falling back to database search.', [
                 'query' => $query,
                 'error' => $e->getMessage(),
             ]);
 
-            return $this->searchWithDatabase($query, $filters, $includeRestricted);
+            return $this->searchWithDatabase($query, $filters, $statuses);
         }
     }
 
-    protected function searchWithMeilisearch(string $query, array $filters = [], bool $includeRestricted = false)
+    protected function searchWithMeilisearch(string $query, array $filters, array $statuses)
     {
         $this->pingMeilisearch();
-
-        $statuses = $includeRestricted ? ['active', 'restricted'] : ['active'];
 
         $builder = Thesis::search($query)
             ->whereIn('status', $statuses)
@@ -52,7 +60,14 @@ class SearchService
             // department tag, its cover image and its icon — while the same
             // cards showed all three when browsing without a query, because
             // /theses does load the relation.
+            //
+            // The status is checked AGAIN here, against the database. The index
+            // is a copy and can lag behind: the Archive button used to leave it
+            // saying "active", and because hydration only looks rows up by id,
+            // guests were shown archived work. The index filter keeps results
+            // relevant; this one is what keeps them allowed.
             ->query(fn ($q) => $q->with('category')
+                ->whereIn('status', $statuses)
                 ->withCount(['readingHistory as views_count', 'favorites as bookmark_count']));
 
         if (!empty($filters['category_id'])) {
@@ -90,9 +105,8 @@ class SearchService
         }
     }
 
-    protected function searchWithDatabase(string $query, array $filters = [], bool $includeRestricted = false)
+    protected function searchWithDatabase(string $query, array $filters, array $statuses)
     {
-        $statuses = $includeRestricted ? ['active', 'restricted'] : ['active'];
 
         // Same eager-load as the Meilisearch path above — the fallback must
         // return the same shape, or search results look different depending on

@@ -22,6 +22,46 @@ class Thesis extends Model
         return ['ocr_completed_at' => 'datetime'];
     }
 
+    public const STATUSES = ['active', 'restricted', 'archived'];
+
+    /**
+     * Which thesis states this viewer is allowed to see at all.
+     *
+     * The ONE definition, for the list, the single-item view, search and PDF
+     * reading. They used to decide separately and disagreed in every
+     * direction: the list let any caller ask for `?status=archived` (so a
+     * guest could read archived titles), the single-item view hid archived
+     * records from staff too, search hard-coded active/restricted for
+     * everyone, and the PDF token refused staff an archived document they were
+     * allowed to open.
+     *
+     * Guests see published work. Signed-in readers additionally see restricted
+     * work. Staff and Super Admins also see archived work, because managing it
+     * is their job.
+     */
+    public static function visibleStatusesFor($user): array
+    {
+        if ($user && ($user->isStaff() || $user->isSuperAdmin())) {
+            return self::STATUSES;
+        }
+
+        return $user ? ['active', 'restricted'] : ['active'];
+    }
+
+    /**
+     * Narrow the visible statuses to the one a caller asked for. A status the
+     * viewer may not see leaves an EMPTY list - it returns nothing rather than
+     * quietly ignoring the rule.
+     */
+    public static function statusesRequestedBy($user, ?string $requested): array
+    {
+        $visible = self::visibleStatusesFor($user);
+
+        return $requested
+            ? array_values(array_intersect([$requested], $visible))
+            : $visible;
+    }
+
     public function toSearchableArray(): array
     {
         return [

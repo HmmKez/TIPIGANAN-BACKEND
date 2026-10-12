@@ -82,48 +82,26 @@ class ThesisController extends Controller
         }
     }
 
-    /**
-     * Which thesis states this viewer is allowed to see at all.
-     *
-     * One definition, used by both the list and the single-item view, because
-     * they previously disagreed in both directions: the list let ANY caller ask
-     * for `?status=archived` and got it (so a guest could read the titles of
-     * archived work, and would equally have seen restricted items, which the
-     * system promises are for signed-in users only), while the single-item view
-     * hid archived records from staff as well - leaving Collection Management
-     * offering an Edit action that opened a broken screen.
-     *
-     * Guests see published work. Signed-in readers additionally see restricted
-     * work. Staff and Super Admins also see archived work, because managing it
-     * is their job.
-     */
+    // The rule itself lives on the model (Thesis::visibleStatusesFor), so search
+    // and PDF reading apply the same one as the list and the single-item view.
     private function visibleStatusesFor($user): array
     {
-        if ($user && ($user->isStaff() || $user->isSuperAdmin())) {
-            return ['active', 'restricted', 'archived'];
-        }
-
-        return $user ? ['active', 'restricted'] : ['active'];
+        return Thesis::visibleStatusesFor($user);
     }
 
     // Public — guests can see the list but not open documents
     public function index(Request $request)
     {
-        // Restricted theses are visible to any logged-in user (student and
-        // up) but hidden from guests entirely; archived theses stay hidden
-        // from everyone unless explicitly requested via ?status=.
+        // Who sees which statuses: see Thesis::visibleStatusesFor.
         // This route has no auth:sanctum middleware, so the default guard
         // stays 'web' — the 'sanctum' guard must be asked for explicitly.
         $user = $request->user('sanctum');
-        $defaultStatuses = $this->visibleStatusesFor($user);
 
         // A requested status the viewer may not see returns NOTHING, rather
         // than quietly ignoring the rule. `?status=` used to be applied
         // verbatim, so `?status=archived` served archived work to anyone who
         // typed it into the address bar.
-        $requestedStatuses = $request->status
-            ? array_values(array_intersect([$request->status], $defaultStatuses))
-            : $defaultStatuses;
+        $requestedStatuses = Thesis::statusesRequestedBy($user, $request->status);
 
         $theses = Thesis::with('category', 'uploader')
             // Browse/Collection Management sort by and display this — a
@@ -260,9 +238,11 @@ class ThesisController extends Controller
     // Protected — generates a signed URL for secure PDF viewing
     public function generateViewToken(Request $request, $id)
     {
-        // Any logged-in user can read a restricted thesis (that's what
-        // "restricted" means — hidden from guests, open to logged-in users).
-        $thesis = Thesis::whereIn('status', ['active', 'restricted'])->findOrFail($id);
+        // Same rule as seeing it: any logged-in user can read a restricted
+        // thesis (that's what "restricted" means), and staff can also read an
+        // archived one. This used to hard-code active/restricted, so staff could
+        // open an archived item's page but got a 404 the moment they read it.
+        $thesis = Thesis::whereIn('status', Thesis::visibleStatusesFor($request->user()))->findOrFail($id);
 
         // Delete any existing token for this user + thesis
         SignedUrlToken::where('user_id', $request->user()->id)
@@ -820,6 +800,10 @@ class ThesisController extends Controller
         // withoutSyncingToSearch prevents a Meilisearch connection attempt
         // when Scout driver is meilisearch but the service isn't running locally.
         Thesis::withoutSyncingToSearch(fn() => $thesis->update(['status' => 'archived']));
+        // The search index must learn the new status too. Without this the
+        // index kept saying "active", and search showed archived work to
+        // guests - verified live before this line was added.
+        $this->syncSearchable($thesis);
 
         AuditLog::create([
             'user_id'     => $request->user()->id,
