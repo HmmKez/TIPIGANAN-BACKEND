@@ -74,8 +74,8 @@ class SearchService
             $builder->where('category_id', (int) $filters['category_id']);
         }
 
-        if (!empty($filters['year_published'])) {
-            $builder->where('year_published', (int) $filters['year_published']);
+        if (!empty($filters['year'])) {
+            $builder->where('year', (int) $filters['year']);
         }
 
         return $builder->paginate(12);
@@ -127,8 +127,8 @@ class SearchService
             $builder->where('category_id', $filters['category_id']);
         }
 
-        if (!empty($filters['year_published'])) {
-            $builder->where('year_published', $filters['year_published']);
+        if (!empty($filters['year'])) {
+            $builder->where('year', $filters['year']);
         }
 
         return $builder->paginate(12);

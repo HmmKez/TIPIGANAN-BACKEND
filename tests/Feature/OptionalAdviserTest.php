@@ -46,7 +46,7 @@ class OptionalAdviserTest extends TestCase
         return $this->actingAs($this->staff)->postJson('/api/theses', array_merge([
             'title'          => 'A Collection Item',
             'authors'        => 'Someone',
-            'year_published' => 2026,
+            'year'           => 2026,
             'category_id'    => $this->category->id,
             'pdf_file'       => UploadedFile::fake()->createWithContent('t.pdf', $this->minimalPdf()),
         ], $overrides));

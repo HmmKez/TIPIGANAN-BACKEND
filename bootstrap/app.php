@@ -33,6 +33,8 @@ return Application::configure(basePath: dirname(__DIR__))
             // degrade gracefully instead of 500ing when the cache backend
             // (Redis) is unreachable. See app/Http/Middleware/SafeThrottleRequests.php.
             'throttle'           => \App\Http\Middleware\SafeThrottleRequests::class,
+            // CSV roster: signed-in accounts must still be on the school's list.
+            'roster'             => \App\Http\Middleware\EnsureOnSchoolRoster::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

@@ -52,7 +52,7 @@ class ThesisFileVersionTest extends TestCase
             'adviser'        => 'Adv',
             'abstract'       => 'kept abstract',
             'keywords'       => 'kept, keywords',
-            'year_published' => 2024,
+            'year'           => 2024,
             'category_id'    => $this->category->id,
             'pages'          => 5,
             'file_path'      => $path,

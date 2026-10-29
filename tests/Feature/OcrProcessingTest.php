@@ -61,7 +61,7 @@ class OcrProcessingTest extends TestCase
             'title'          => 'A Scanned Thesis',
             'authors'        => 'Juan Dela Cruz',
             'adviser'        => 'Prof. Villanueva',
-            'year_published' => 2026,
+            'year'           => 2026,
             'category_id'    => $category->id,
             'pdf_file'       => UploadedFile::fake()->create('thesis.pdf', 120, 'application/pdf'),
         ]);
@@ -77,7 +77,7 @@ class OcrProcessingTest extends TestCase
             'authors'        => 'Maria Santos',
             'adviser'        => 'Prof. Villanueva',
             'abstract'       => '',
-            'year_published' => 2025,
+            'year'           => 2025,
             'category_id'    => Category::create([
                 'name' => 'Nursing '.uniqid(), 'code' => 'N'.random_int(100, 999), 'created_by' => $staff->id,
             ])->id,

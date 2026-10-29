@@ -7,8 +7,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
-// Admins no longer create accounts; everyone self-registers with their school
-// ID number and a Super Admin promotes an existing account. The guards below
+// Admins do not create accounts; every account is activated at the library
+// from the school list, and a Super Admin promotes an existing account. The guards below
 // are the reason this endpoint is safe to expose, and each one protects against
 // a mistake that cannot be undone from inside the app.
 class UserRoleChangeTest extends TestCase

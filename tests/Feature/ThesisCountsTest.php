@@ -43,7 +43,7 @@ class ThesisCountsTest extends TestCase
             'adviser'        => 'Adviser',
             'abstract'       => '',
             'keywords'       => null,
-            'year_published' => 2024,
+            'year'           => 2024,
             'category_id'    => $this->category->id,
             'pages'          => 10,
             'file_path'      => 'theses/x.pdf',

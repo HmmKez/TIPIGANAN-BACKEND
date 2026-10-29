@@ -25,6 +25,7 @@ class PermissionSeeder extends Seeder
             'download_thesis',
             'view_logs',
             'export_reports',
+            'activate_accounts',
         ];
 
         foreach ($permissions as $permission) {
@@ -53,6 +54,8 @@ class PermissionSeeder extends Seeder
             'manage_categories',
             'view_logs',
             'export_reports',
+            // Accounts are activated at the library desk, by any staff member.
+            'activate_accounts',
         ]);
 
         // Students and teachers — read only, no special permissions

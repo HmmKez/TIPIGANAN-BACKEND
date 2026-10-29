@@ -25,18 +25,9 @@ Route::middleware('throttle:api')->group(function () {
 
 // Public routes
 Route::prefix('auth')->group(function () {
-    // Which registration form to show. Read on every visit to the sign-up
-    // page and reveals nothing about any account, so it sits outside the
-    // strict auth limiter.
-    Route::get('/register/options', [AuthController::class, 'registrationOptions']);
-
+    // No registration routes: accounts are activated at the library by staff
+    // (see the activate_accounts group below), never created by the public.
     Route::middleware('throttle:auth')->group(function () {
-        // Step one of registration: check the ID number against the school's
-        // records before asking for anything else. Its own per-IP ceiling lives
-        // in AuthController::verifyIdNumber, because this endpoint reveals
-        // which ID numbers are real and needs a tighter limit than sign-in.
-        Route::post('/register/verify', [AuthController::class, 'verifyIdNumber']);
-        Route::post('/register',        [AuthController::class, 'register']);
         Route::post('/login',           [AuthController::class, 'login']);
     });
 });
@@ -61,8 +52,9 @@ Route::get('/settings/active-term', [SettingController::class, 'activeTerm']);
 // request. Public by definition — this is the page guests land on.
 Route::get('/landing', [LandingController::class, 'index']);
 
-// Protected routes
-Route::middleware('auth:sanctum')->group(function () {
+// Protected routes. 'roster': with the CSV roster in use, the account must
+// still be on the school's list (see EnsureOnSchoolRoster).
+Route::middleware(['auth:sanctum', 'roster'])->group(function () {
 
     // Profile — any logged in user
     Route::get('/profile',        [UserController::class, 'profile']);
@@ -103,8 +95,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Super admin only
     Route::middleware('role:super_admin')->group(function () {
-        // No POST /users. Accounts are not created by an admin any more —
-        // everyone registers themselves with their school ID number, and a
+        // No POST /users. Accounts are made only by activation at the library
+        // (POST /accounts/activation, which checks the school list), and a
         // Super Admin promotes an existing account instead. The route is gone
         // rather than merely hidden in the UI, so it cannot be called directly.
         Route::patch('/users/{id}/role',                [UserController::class, 'changeRole']);
@@ -127,12 +119,25 @@ Route::middleware('auth:sanctum')->group(function () {
         // Which collections are featured on the landing page.
         Route::put('/landing/collections',              [LandingController::class, 'updateCollections']);
         Route::delete('/landing/collections',           [LandingController::class, 'resetCollections']);
+
+        // The school's list of who may use the system (CSV import).
+        Route::get('/school-roster',                    [\App\Http\Controllers\Api\SchoolRosterController::class, 'show']);
+        Route::get('/school-roster/people',             [\App\Http\Controllers\Api\SchoolRosterController::class, 'people']);
+        Route::post('/school-roster/preview',           [\App\Http\Controllers\Api\SchoolRosterController::class, 'preview']);
+        Route::post('/school-roster/import',            [\App\Http\Controllers\Api\SchoolRosterController::class, 'import']);
     });
 
     // Deleting accounts — staff need the delete_accounts permission granted
     // by a Super Admin; Super Admin has it by default via PermissionSeeder.
     Route::middleware(['role:staff|super_admin', 'permission:delete_accounts'])->group(function () {
         Route::delete('/users/{id}', [UserController::class, 'destroy']);
+    });
+
+    // Activating an account at the library desk — every staff member has
+    // activate_accounts by default (School Records page).
+    Route::middleware(['role:staff|super_admin', 'permission:activate_accounts'])->group(function () {
+        Route::post('/accounts/activation/lookup', [\App\Http\Controllers\Api\AccountActivationController::class, 'lookup']);
+        Route::post('/accounts/activation',        [\App\Http\Controllers\Api\AccountActivationController::class, 'activate']);
     });
 
     // Resetting another user's password — staff need the reset_passwords
@@ -180,6 +185,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/scan-inbox/{name}',     [ScanInboxController::class, 'destroy'])
             ->where('name', '[^/\\\\]+');
 
+        // Live "possible duplicate" check for the upload form. Not under
+        // /theses/... - the public /theses/{id} route would claim the path.
+        Route::get('/duplicate-check',          [ThesisController::class, 'duplicateCheck']);
         Route::post('/theses',                  [ThesisController::class, 'store']);
         Route::put('/theses/{id}',              [ThesisController::class, 'update']);
         Route::patch('/theses/{id}/archive',    [ThesisController::class, 'archive']);

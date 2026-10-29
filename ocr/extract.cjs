@@ -5,11 +5,6 @@ const { PDFParse } = require('pdf-parse');
 
 const filePath = process.argv[2];
 
-if (!filePath || !fs.existsSync(filePath)) {
-    process.stdout.write(JSON.stringify({ error: 'File not found: ' + filePath }));
-    process.exit(1);
-}
-
 async function parsePdfText(buffer) {
     const parser = new PDFParse({ data: buffer });
     const result = await parser.getText();
@@ -147,9 +142,69 @@ function extractTitle(lines) {
     return '';
 }
 
+// ---------------------------------------------------------------------------
+// The item's year.
+//
+// A thesis or collection item states its year in its front matter - the cover
+// ("December 2023"), an approval sheet, "A.Y. 2023-2024", "(c) 2021", or the
+// year alone on a line. Only that front matter is searched: past the abstract,
+// table of contents or first chapter, a 4-digit number is far more likely to
+// be about something else ("in March 2020, ...") than the item's own year.
+//
+// Turnitin-wrapped PDFs open with a report whose own dates ("Submission Date
+// Apr 22, 2026, 9:21 AM GMT+8") are not the item's year, so report and
+// timestamp lines are skipped.
+// ---------------------------------------------------------------------------
+const MONTHS = 'january|february|march|april|may|june|july|august|september|october|november|december' +
+    '|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec';
+
+const NOISE_LINE = new RegExp([
+    'submission (id|date)', 'download date', 'report date', 'trn:oid', 'file size',
+    'page \\d+ of \\d+', 'turnitin', 'similarity', 'ai writing', 'ai detection',
+    '\\b\\d{1,2}:\\d{2}\\s*(am|pm)\\b', '\\bgmt\\b',
+].join('|'), 'i');
+
+const FRONT_MATTER_END = ['abstract', 'table of contents', 'contents', 'acknowledgment',
+    'acknowledgement', 'chapter 1', 'chapter i', 'chapter one', 'introduction'];
+
+function plausibleYear(y) {
+    const n = Number(y);
+    return n >= 1950 && n <= new Date().getFullYear() + 1 ? n : null;
+}
+
+function extractYear(lines) {
+    const candidates = [];
+    for (let i = 0; i < lines.length && i < 600; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        // Front matter ends at the first real section heading. Only a short
+        // line counts as a heading - "This study's introduction of..." does not.
+        if (line.length <= 40 && matchesHeading(line, FRONT_MATTER_END)) break;
+        if (NOISE_LINE.test(line)) continue;
+
+        const push = (y, score) => { const n = plausibleYear(y); if (n) candidates.push({ n, score, i }); };
+        let m;
+        // "A.Y. 2023-2024", "S.Y. 2023 - 2024", "Academic Year 2023–2024": the
+        // later year, when the work was completed.
+        if ((m = line.match(/\b(a\.?\s?y\.?|s\.?\s?y\.?|academic year|school year)\s*:?\s*((?:19|20)\d{2})\s*[-–—/]\s*((?:19|20)\d{2})\b/i))) push(m[3], 4);
+        // "December 2023", "May, 2024", "June 15, 2022".
+        const monthYear = new RegExp(`\\b(?:${MONTHS})\\.?,?\\s+(?:\\d{1,2},?\\s+)?((?:19|20)\\d{2})\\b`, 'i');
+        if ((m = line.match(monthYear))) push(m[1], 5);
+        // "© 2021", "Copyright 2021".
+        if ((m = line.match(/(?:©|\(c\)|copyright)\s*((?:19|20)\d{2})\b/i))) push(m[1], 4);
+        // The year alone on its own line, as on many covers.
+        if ((m = line.match(/^((?:19|20)\d{2})$/))) push(m[1], 3);
+    }
+    if (!candidates.length) return '';
+    // Strongest form wins; among equals, the earliest (the cover comes first).
+    candidates.sort((a, b) => b.score - a.score || a.i - b.i);
+    return String(candidates[0].n);
+}
+
 async function extractFromDigitalPdf(text) {
     const lines = text.split('\n');
     const title = extractTitle(lines);
+    const year = extractYear(lines);
 
     // Find where TOC ends so we start searching from real content
     const contentStart = skipTableOfContents(lines);
@@ -186,7 +241,7 @@ async function extractFromDigitalPdf(text) {
         60
     );
 
-    return { title, abstract, introduction, keywords, conclusion, method: 'digital' };
+    return { title, year, abstract, introduction, keywords, conclusion, method: 'digital' };
 }
 
 // Tesseract.js has no PDF parser (Leptonica only reads raster images), so a
@@ -207,6 +262,7 @@ async function extractFromScannedPdf(filePath) {
 
     const lines = text.split('\n');
     const title = extractTitle(lines);
+    const year = extractYear(lines);
     const contentStart = skipTableOfContents(lines);
 
     const abstract = await extractKeySection(lines, contentStart,
@@ -228,12 +284,17 @@ async function extractFromScannedPdf(filePath) {
     );
 
     return {
-        title, abstract, introduction: '', keywords, conclusion, method: 'ocr',
+        title, year, abstract, introduction: '', keywords, conclusion, method: 'ocr',
         pagesProcessed, totalPages,
     };
 }
 
 async function run() {
+    if (!filePath || !fs.existsSync(filePath)) {
+        process.stdout.write(JSON.stringify({ error: 'File not found: ' + filePath }));
+        process.exit(1);
+    }
+
     try {
         const buffer = fs.readFileSync(filePath);
         const text = await parsePdfText(buffer);
@@ -253,4 +314,9 @@ async function run() {
     }
 }
 
-run();
+// Run only when invoked as a script, so the year rules can be tested directly.
+if (require.main === module) {
+    run();
+}
+
+module.exports = { extractYear };

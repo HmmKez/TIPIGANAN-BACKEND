@@ -12,38 +12,6 @@ class AuthTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function registerPayload(array $overrides = []): array
-    {
-        return array_merge([
-            'id_number'             => '54321',
-            'email'                 => 'student@example.com',
-            'password'              => 'Password123',
-            'password_confirmation' => 'Password123',
-            'role'                  => 'student',
-        ], $overrides);
-    }
-
-    public function test_registration_rejects_a_weak_password(): void
-    {
-        Role::findOrCreate('student');
-
-        $this->postJson('/api/auth/register', $this->registerPayload([
-            'password'              => 'weak',
-            'password_confirmation' => 'weak',
-        ]))->assertStatus(422)->assertJsonValidationErrors('password');
-    }
-
-    public function test_registration_succeeds_with_a_strong_password_and_returns_a_token(): void
-    {
-        Role::findOrCreate('student');
-
-        $this->postJson('/api/auth/register', $this->registerPayload())
-            ->assertStatus(201)
-            ->assertJsonStructure(['token', 'user' => ['id', 'email']]);
-
-        $this->assertDatabaseHas('users', ['email' => 'student@example.com', 'role' => 'student']);
-    }
-
     public function test_login_returns_a_token_with_correct_credentials(): void
     {
         User::factory()->create([
@@ -226,20 +194,6 @@ class AuthTest extends TestCase
         }
     }
 
-    public function test_registration_does_not_ask_for_a_name(): void
-    {
-        Role::findOrCreate('student');
-
-        // The whole point of the change: an account is created from an ID
-        // number alone, because the school's API supplies the name later.
-        $this->postJson('/api/auth/register', $this->registerPayload())->assertCreated();
-
-        $user = User::where('id_number', '54321')->first();
-
-        $this->assertNotNull($user);
-        $this->assertNull($user->name, 'Registration must not invent or require a name.');
-    }
-
     public function test_a_user_with_no_name_still_has_something_to_display(): void
     {
         // This is the one that protects the watermark. Every page of every PDF
@@ -251,46 +205,6 @@ class AuthTest extends TestCase
         $this->assertSame('31337', $user->display_name);
         $this->assertSame('31337', $user->fresh()->toArray()['display_name'],
             'display_name must be serialised to the frontend, not just readable in PHP.');
-    }
-
-    public function test_an_id_number_cannot_be_registered_twice(): void
-    {
-        Role::findOrCreate('student');
-
-        $this->postJson('/api/auth/register', $this->registerPayload())->assertCreated();
-
-        // Same ID, different email — must still be refused, or two people would
-        // share the one credential everything else is keyed on.
-        $this->postJson('/api/auth/register', $this->registerPayload([
-            'email' => 'someone.else@example.com',
-        ]))->assertStatus(422)->assertJsonValidationErrors('id_number');
-    }
-
-    public function test_an_id_number_must_be_exactly_five_digits(): void
-    {
-        Role::findOrCreate('student');
-
-        foreach (['1234', '123456', 'abcde', ''] as $bad) {
-            $this->postJson('/api/auth/register', $this->registerPayload(['id_number' => $bad]))
-                ->assertStatus(422)
-                ->assertJsonValidationErrors('id_number');
-        }
-    }
-
-    public function test_a_leading_zero_in_an_id_number_survives(): void
-    {
-        Role::findOrCreate('student');
-
-        // "00123" is a legitimate 5-digit school ID. Stored as an integer it
-        // would silently become 123 and the person could never log in again.
-        $this->postJson('/api/auth/register', $this->registerPayload(['id_number' => '00123']))
-            ->assertCreated();
-
-        $this->assertDatabaseHas('users', ['id_number' => '00123']);
-
-        $this->postJson('/api/auth/login', ['id_number' => '00123', 'password' => 'Password123'])
-            ->assertOk()
-            ->assertJsonStructure(['token']);
     }
 
     public function test_logging_in_with_an_email_no_longer_works(): void

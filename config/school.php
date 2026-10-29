@@ -18,6 +18,13 @@ return [
     |         flow works end to end, which is how it is developed, demonstrated
     |         and tested while the school's own system is unavailable.
     |
+    |   csv   The school's list imported from a CSV file by the Super Admin
+    |         (School Records page, or php artisan school:import-roster). Only
+    |         IDs on the list can be activated at the library (staff confirm the
+    |         name, the person types their own email and password), and ONLY
+    |         accounts on the list can sign in or keep using the system, every
+    |         role included. Until a list is imported nothing is enforced.
+    |
     |   http  The school's real records system. Requires `url` below. See
     |         app/Support/SchoolDirectory/HttpSchoolDirectory.php - switching to
     |         this is expected to need edits in that one file and nowhere else.

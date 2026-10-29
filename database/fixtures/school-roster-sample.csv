@@ -1,0 +1,16 @@
+id_number,first_name,last_name,role
+90001,Super,Admin,super_admin
+90002,Library,Staff,staff
+90003,Juan,dela Cruz,student
+90004,Maria,Santos,teacher
+90005,Demo,Student,student
+90006,Demo,Teacher,teacher
+10234,Juan,Dela Cruz,student
+51234,Demo,Student,student
+10001,Kent,Concha,student
+10002,AJ,Reyes,student
+10003,Ma. Teresa,Lim,student
+10004,Niño,Bautista,student
+00042,Rowena Mae,Otadoy,student
+20001,Angela Cecilia,Lenteria,teacher
+20002,Josefina,Ramos,staff

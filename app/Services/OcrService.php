@@ -39,6 +39,7 @@ class OcrService
 
         return [
             'title'        => $result['title']        ?? '',
+            'year'         => $this->cleanYear($result['year'] ?? null),
             'abstract'     => $result['abstract']      ?? '',
             'introduction' => $result['introduction']  ?? '',
             'keywords'     => $result['keywords']      ?? '',
@@ -53,6 +54,16 @@ class OcrService
     // PDF has no clean list), what comes back is a run of body text, not short
     // comma-separated terms. A genuine list is delimited short terms, so
     // requiring real delimiters + a sane term length filters out the misses.
+    // The reader returns a 4-digit year as text, or nothing. Anything else -
+    // an older script, a stray value - becomes null rather than reaching the
+    // database as a bad year.
+    public function cleanYear(mixed $raw): ?int
+    {
+        $year = filter_var($raw, FILTER_VALIDATE_INT);
+
+        return $year !== false && $year >= 1950 && $year <= (int) date('Y') + 1 ? $year : null;
+    }
+
     public function cleanKeywords(string $raw): string
     {
         $terms = preg_split('/[,;\n]+/', $raw);
@@ -85,6 +96,7 @@ class OcrService
     {
         return [
             'title'        => '',
+            'year'         => null,
             'abstract'     => '',
             'introduction' => '',
             'keywords'     => '',

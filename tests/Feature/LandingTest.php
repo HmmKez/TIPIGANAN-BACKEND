@@ -43,7 +43,7 @@ class LandingTest extends TestCase
             'adviser'        => 'Adviser',
             'abstract'       => '',
             'keywords'       => null,
-            'year_published' => 2024,
+            'year'           => 2024,
             'category_id'    => $category->id,
             'pages'          => 10,
             'file_path'      => "theses/{$status}.pdf",

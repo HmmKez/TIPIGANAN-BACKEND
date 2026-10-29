@@ -52,10 +52,12 @@ class ProcessThesisOcr implements ShouldQueue
         // with whatever OCR found on *every* upload, even when the staff
         // had already typed a real list, which is how earlier test uploads
         // ended up with long/garbled keywords in the first place.
+        // The year follows the same rule: filled only when staff left it blank.
         Thesis::withoutSyncingToSearch(function () use ($cleanedKeywords, $extracted) {
             $this->thesis->update([
                 'keywords' => $this->thesis->keywords ?: $cleanedKeywords,
                 'abstract' => $this->thesis->abstract ?: $extracted['abstract'],
+                'year'     => $this->thesis->year ?: ($extracted['year'] ?? null),
             ]);
         });
 

@@ -141,7 +141,7 @@ return [
         'key' => env('MEILISEARCH_KEY'),
         'index-settings' => [
             'theses' => [
-                'filterableAttributes' => ['status', 'category_id', 'year_published'],
+                'filterableAttributes' => ['status', 'category_id', 'year'],
             ],
         ],
     ],

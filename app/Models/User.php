@@ -15,6 +15,7 @@ class User extends Authenticatable
     protected $fillable = [
         'name', 'id_number', 'email', 'password', 'role', 'status', 'avatar_path',
         'directory_status', 'directory_checked_at', 'directory_person_key', 'directory_exempt',
+        'must_change_password', 'deactivated_by_roster', 'needs_activation',
     ];
 
     protected $hidden = [
@@ -46,6 +47,9 @@ class User extends Authenticatable
             'password'             => 'hashed',
             'directory_checked_at' => 'datetime',
             'directory_exempt'     => 'boolean',
+            'must_change_password' => 'boolean',
+            'deactivated_by_roster' => 'boolean',
+            'needs_activation' => 'boolean',
         ];
     }
 

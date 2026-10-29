@@ -38,7 +38,7 @@ class BookmarkVisibilityTest extends TestCase
             'authors'        => 'Some Author',
             'adviser'        => 'Adviser',
             'abstract'       => 'An abstract.',
-            'year_published' => 2024,
+            'year'           => 2024,
             'category_id'    => $category->id,
             'pages'          => 10,
             'file_path'      => 'theses/a.pdf',

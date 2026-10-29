@@ -71,7 +71,7 @@ class ReportController extends Controller
             ->groupBy('thesis_id')
             ->orderByDesc('citation_count')
             ->limit(10)
-            ->with('thesis:id,title,authors,year_published,category_id');
+            ->with('thesis:id,title,authors,year,category_id');
     }
 
     /**
@@ -175,10 +175,10 @@ class ReportController extends Controller
     public function byYear()
     {
         $results = SafeCache::remember('reports:by-year', self::TTL, fn () =>
-            Thesis::select('year_published', DB::raw('COUNT(*) as total'))
+            Thesis::select('year', DB::raw('COUNT(*) as total'))
                 ->where('status', 'active')
-                ->groupBy('year_published')
-                ->orderByDesc('year_published')
+                ->groupBy('year')
+                ->orderByDesc('year')
                 ->get()
                 ->toArray()
         );
@@ -348,7 +348,7 @@ class ReportController extends Controller
                 return [
                     $item->thesis?->title ?? 'Unknown',
                     $item->thesis?->authors ?? '-',
-                    $item->thesis?->year_published ?? '-',
+                    $item->thesis?->year ?? '-',
                     $item->citation_count,
                 ];
             })->toArray(),
@@ -376,17 +376,18 @@ class ReportController extends Controller
 
     private function byYearReportData(): array
     {
-        $results = Thesis::select('year_published', DB::raw('COUNT(*) as total'))
+        $results = Thesis::select('year', DB::raw('COUNT(*) as total'))
             ->where('status', 'active')
-            ->groupBy('year_published')
-            ->orderByDesc('year_published')
+            ->groupBy('year')
+            ->orderByDesc('year')
             ->get();
 
         return [
             'columns' => ['Year', 'Total Theses'],
             'rows' => $results->map(function ($item) {
                 return [
-                    $item->year_published,
+                    // The year is optional, so a group of items with none.
+                    $item->year ?? 'No year',
                     $item->total,
                 ];
             })->toArray(),

@@ -282,7 +282,7 @@ class ScanInboxTest extends TestCase
                 'title'          => 'A Thesis That Was Scanned',
                 'authors'        => 'Juan Dela Cruz',
                 'adviser'        => 'Prof. Ramon Villanueva',
-                'year_published' => 2026,
+                'year'           => 2026,
                 'category_id'    => $category->id,
                 'scan_file'      => 'ready-to-file.pdf',
             ])
@@ -310,7 +310,7 @@ class ScanInboxTest extends TestCase
                 'title'          => 'Ghost Scan',
                 'authors'        => 'Nobody',
                 'adviser'        => 'Nobody',
-                'year_published' => 2026,
+                'year'           => 2026,
                 'category_id'    => $category->id,
                 'scan_file'      => 'was-never-scanned.pdf',
             ])
@@ -335,7 +335,7 @@ class ScanInboxTest extends TestCase
                 'title'          => 'No File At All',
                 'authors'        => 'Nobody',
                 'adviser'        => 'Nobody',
-                'year_published' => 2026,
+                'year'           => 2026,
                 'category_id'    => $category->id,
             ])
             ->assertStatus(422)

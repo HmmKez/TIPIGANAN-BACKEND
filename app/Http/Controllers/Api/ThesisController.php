@@ -10,6 +10,7 @@ use App\Models\SignedUrlToken;
 use App\Models\Thesis;
 use App\Models\ThesisFileVersion;
 use App\Support\PdfNormalizer;
+use App\Support\DuplicateFinder;
 use App\Support\ScanInbox;
 use App\Support\ThesisFilePurger;
 use Illuminate\Http\Request;
@@ -117,8 +118,8 @@ class ThesisController extends Controller
             ->whereIn('status', $requestedStatuses)
             ->when($request->category_id, fn($q) =>
                 $q->where('category_id', $request->category_id))
-            ->when($request->year_published, fn($q) =>
-                $q->where('year_published', $request->year_published))
+            ->when($request->year, fn($q) =>
+                $q->where('year', $request->year))
             ->when($request->author, fn($q) =>
                 $q->where('authors', 'LIKE', "%{$request->author}%"))
             // Collection Management's search bar ("Search by title or
@@ -203,7 +204,7 @@ class ThesisController extends Controller
                       ->orWhere('abstract', 'LIKE', "%{$term}%");
                 }
             })
-            ->get(['id', 'title', 'authors', 'year_published', 'category_id', 'keywords', 'abstract']);
+            ->get(['id', 'title', 'authors', 'year', 'category_id', 'keywords', 'abstract']);
 
         return $candidates
             ->map(function ($t) use ($thesis, $terms) {
@@ -231,7 +232,7 @@ class ThesisController extends Controller
                 'id'             => $t->id,
                 'title'          => $t->title,
                 'authors'        => $t->authors,
-                'year_published' => $t->year_published,
+                'year'           => $t->year,
             ]);
     }
 
@@ -368,15 +369,62 @@ class ThesisController extends Controller
      *
      * @throws ValidationException when the file is missing, unreadable, or too big.
      */
-    private function importFromScanInbox(string $name): string
+    /** A scan's full path, or a validation error naming the problem. */
+    private function resolveScan(string $name): string
     {
-        $inbox = app(ScanInbox::class);
-
         try {
-            $source = $inbox->resolve($name);
+            return app(ScanInbox::class)->resolve($name);
         } catch (\RuntimeException $e) {
             throw ValidationException::withMessages(['scan_file' => [$e->getMessage()]]);
         }
+    }
+
+    /**
+     * Refuse the same file twice; warn about the same work as another file.
+     * Null when the upload may go ahead.
+     *
+     * Runs before anything is stored, so a refused upload leaves no file on
+     * disk, and a refused scan stays in the inbox to be discarded or used.
+     */
+    private function duplicateResponse(Request $request, string $originalHash): ?\Illuminate\Http\JsonResponse
+    {
+        if ($same = DuplicateFinder::sameFile($originalHash)) {
+            return response()->json([
+                'reason'       => 'same_file',
+                'message'      => $this->sameFileMessage($same),
+                'duplicate_of' => DuplicateFinder::describe($same),
+            ], 409);
+        }
+
+        // A likely repeat, not a certain one: staff may confirm and go ahead.
+        if (! $request->boolean('confirm_duplicate')) {
+            $similar = DuplicateFinder::similar($request->title, $request->authors);
+            if ($similar->isNotEmpty()) {
+                return response()->json([
+                    'reason'  => 'possible_duplicate',
+                    'message' => 'This looks like an item already in the repository: same title and at least one author in common.',
+                    'matches' => $similar->map(fn ($t) => DuplicateFinder::describe($t))->all(),
+                ], 409);
+            }
+        }
+
+        return null;
+    }
+
+    private function sameFileMessage(Thesis $existing): string
+    {
+        $year = $existing->year ? " ({$existing->year})" : '';
+        $message = "This exact file is already in the repository as \"{$existing->title}\"{$year}.";
+
+        return $existing->status === 'archived'
+            ? $message.' It is archived — restore it from Collection Management instead of uploading it again.'
+            : $message;
+    }
+
+    private function importFromScanInbox(string $name): string
+    {
+        $inbox = app(ScanInbox::class);
+        $source = $this->resolveScan($name);
 
         // An uploaded file is size-checked by the `max:` rule; a scan never
         // passes through validation, so the same ceiling has to be applied here
@@ -415,7 +463,9 @@ class ThesisController extends Controller
             // see its handle() for the fill-only-if-empty logic.
             'abstract'       => 'nullable|string',
             'keywords'       => 'nullable|string',
-            'year_published' => 'required|digits:4|integer',
+            // Optional, like the abstract and keywords: left blank, it is
+            // filled in from the document by ProcessThesisOcr.
+            'year'           => 'nullable|digits:4|integer',
             'category_id'    => 'required|exists:categories,id',
             'pages'          => 'nullable|integer',
             'cover_image'    => 'nullable|image|max:2048',
@@ -424,7 +474,21 @@ class ThesisController extends Controller
             // which saves staff downloading and re-uploading their own scan.
             'pdf_file'       => 'required_without:scan_file|nullable|mimes:pdf|max:153600',
             'scan_file'      => 'required_without:pdf_file|nullable|string|max:255',
+            // Sent after staff saw the "possible duplicate" warning and chose
+            // to upload anyway. Never overrides an identical file.
+            'confirm_duplicate' => 'sometimes|boolean',
         ]);
+
+        // The fingerprint of the file as received - before the viewer rewrite
+        // below, whose output differs every time (see the original_checksum
+        // migration).
+        $originalHash = hash_file('sha256', $request->filled('scan_file')
+            ? $this->resolveScan($request->input('scan_file'))
+            : $request->file('pdf_file')->getRealPath());
+
+        if ($refusal = $this->duplicateResponse($request, $originalHash)) {
+            return $refusal;
+        }
 
         $pdfPath = $request->filled('scan_file')
             ? $this->importFromScanInbox($request->input('scan_file'))
@@ -457,11 +521,12 @@ class ThesisController extends Controller
             // as empty either way once OCR fills it in.
             'abstract'        => $request->abstract ?? '',
             'keywords'        => $request->keywords,
-            'year_published'  => $request->year_published,
+            'year'            => $request->year,
             'category_id'     => $request->category_id,
             'pages'           => $request->pages,
             'file_path'       => $pdfPath,
             'checksum'        => $checksum,
+            'original_checksum' => $originalHash,
             'cover_image_path'=> $coverPath,
             'status'          => 'active',
             'uploaded_by'     => $request->user()->id,
@@ -504,6 +569,22 @@ class ThesisController extends Controller
         return response()->json($thesis, 201);
     }
 
+    // Staff and above — the upload form's live "possible duplicate" warning:
+    // items with a matching title and at least one author in common. The
+    // same check guards store() itself, so skipping this call skips nothing.
+    public function duplicateCheck(Request $request)
+    {
+        $request->validate([
+            'title'   => 'required|string|max:500',
+            'authors' => 'nullable|string|max:1000',
+        ]);
+
+        return response()->json([
+            'matches' => DuplicateFinder::similar($request->title, $request->authors)
+                ->map(fn ($t) => DuplicateFinder::describe($t))->all(),
+        ]);
+    }
+
     // Staff and above — edit thesis metadata
     public function update(Request $request, $id)
     {
@@ -520,7 +601,7 @@ class ThesisController extends Controller
             // to '' below since the column is NOT NULL.
             'abstract'       => 'sometimes|nullable|string',
             'keywords'       => 'nullable|string',
-            'year_published' => 'sometimes|digits:4|integer',
+            'year'           => 'sometimes|nullable|digits:4|integer',
             'category_id'    => 'sometimes|exists:categories,id',
             'pages'          => 'nullable|integer',
             'status'         => 'sometimes|in:active,archived,restricted',
@@ -528,7 +609,7 @@ class ThesisController extends Controller
 
         $data = $request->only([
             'title', 'authors', 'adviser', 'abstract',
-            'keywords', 'year_published', 'category_id',
+            'keywords', 'year', 'category_id',
             'pages', 'status',
         ]);
         // abstract is NOT NULL — clearing it in the UI sends '' which the
@@ -568,6 +649,23 @@ class ThesisController extends Controller
             'pdf_file' => 'required|mimes:pdf|max:153600',
         ]);
 
+        // Same rule as uploading: a file already in the repository is not
+        // filed again - neither as this item's current file nor another's.
+        $originalHash = hash_file('sha256', $request->file('pdf_file')->getRealPath());
+        if (in_array($originalHash, array_filter([$thesis->original_checksum, $thesis->checksum]), true)) {
+            return response()->json([
+                'reason'  => 'same_file',
+                'message' => 'This is already the current file of this item — nothing to replace.',
+            ], 409);
+        }
+        if ($other = DuplicateFinder::sameFile($originalHash, $thesis->id)) {
+            return response()->json([
+                'reason'       => 'same_file',
+                'message'      => 'That file belongs to another item: '.$this->sameFileMessage($other),
+                'duplicate_of' => DuplicateFinder::describe($other),
+            ], 409);
+        }
+
         $oldPath = $thesis->file_path;
         $newPath = $request->file('pdf_file')->store('theses', 'local');
 
@@ -578,7 +676,7 @@ class ThesisController extends Controller
         // Fixity hash of the new file (see store()).
         $newChecksum = hash_file('sha256', Storage::disk('local')->path($newPath));
 
-        DB::transaction(function () use ($thesis, $oldPath, $newPath, $newChecksum, $request) {
+        DB::transaction(function () use ($thesis, $oldPath, $newPath, $newChecksum, $originalHash, $request) {
             ThesisFileVersion::create([
                 'thesis_id'   => $thesis->id,
                 'file_path'   => $oldPath,
@@ -595,8 +693,9 @@ class ThesisController extends Controller
             // OCR re-dispatch below does fill abstract/keywords, that job runs
             // its own best-effort sync.
             Thesis::withoutSyncingToSearch(fn () => $thesis->update([
-                'file_path' => $newPath,
-                'checksum'  => $newChecksum,
+                'file_path'         => $newPath,
+                'checksum'          => $newChecksum,
+                'original_checksum' => $originalHash,
             ]));
         });
 
@@ -625,12 +724,14 @@ class ThesisController extends Controller
         $detected = [
             'abstract' => $extracted['abstract'] ?? '',
             'keywords' => $ocr->cleanKeywords($extracted['keywords'] ?? ''),
+            'year'     => $extracted['year'] ?? null,
             'method'   => $extracted['method'] ?? 'unknown',
         ];
 
         Thesis::withoutSyncingToSearch(fn () => $thesis->update([
             'abstract' => $thesis->abstract ?: $detected['abstract'],
             'keywords' => $thesis->keywords ?: $detected['keywords'],
+            'year'     => $thesis->year ?: $detected['year'],
         ]));
 
         ThesisFilePurger::sweepIfDue();
@@ -658,6 +759,7 @@ class ThesisController extends Controller
         return response()->json([
             'abstract' => $extracted['abstract'] ?? '',
             'keywords' => $ocr->cleanKeywords($extracted['keywords'] ?? ''),
+            'year'     => $extracted['year'] ?? null,
             'method'   => $extracted['method'] ?? 'unknown',
         ]);
     }
@@ -756,8 +858,12 @@ class ThesisController extends Controller
             // searchable field, so skip the Scout sync (and don't let a down
             // Meilisearch 500 the restore).
             Thesis::withoutSyncingToSearch(fn () => $thesis->update([
-                'file_path' => $version->file_path,
-                'checksum'  => $restoredChecksum,
+                'file_path'         => $version->file_path,
+                'checksum'          => $restoredChecksum,
+                // The restored file's as-uploaded fingerprint was never kept,
+                // so none rather than the one describing the file just set
+                // aside. `checksum` still matches the stored file itself.
+                'original_checksum' => null,
             ]));
             $version->update(['status' => 'restored']);
         });

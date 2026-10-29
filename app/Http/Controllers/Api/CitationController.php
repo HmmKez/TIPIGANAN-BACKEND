@@ -26,12 +26,16 @@ class CitationController extends Controller
         $thesis = Thesis::with('category')->findOrFail($thesisId);
 
         $authors = $thesis->authors;
-        $year    = $thesis->year_published;
+        // The year is optional; APA and MLA both write "n.d." (no date) when
+        // a work states none.
+        $year    = $thesis->year ?: 'n.d.';
         $title   = $thesis->title;
         $school  = 'Mater Dei College';
 
         $defaultApa = "{$authors} ({$year}). {$title} [Unpublished thesis]. {$school}.";
-        $defaultMla = "{$authors}. \"{$title}.\" Unpublished thesis, {$school}, {$year}.";
+        // "n.d." already ends in a full stop; adding the closing one gave "n.d..".
+        $mlaEnd     = str_ends_with($year, '.') ? $year : "{$year}.";
+        $defaultMla = "{$authors}. \"{$title}.\" Unpublished thesis, {$school}, {$mlaEnd}";
 
         // firstOrCreate only inserts the default text the first time a
         // format is requested — if staff have since customized the citation
@@ -46,6 +50,17 @@ class CitationController extends Controller
             ['thesis_id' => $thesis->id, 'format_type' => 'MLA'],
             ['citation_text' => $defaultMla, 'created_by' => null]
         );
+
+        // A citation nobody customized (created_by still null) is only ever
+        // the default, so keep it in step with the record. Otherwise the text
+        // frozen the first time it was shown kept an old title, authors or
+        // "n.d." after the year was read from the document. Customized ones
+        // (update() sets created_by) are never touched.
+        foreach ([[$apaCitation, $defaultApa], [$mlaCitation, $defaultMla]] as [$citation, $default]) {
+            if ($citation->created_by === null && $citation->citation_text !== $default) {
+                $citation->update(['citation_text' => $default]);
+            }
+        }
 
         return response()->json([
             'APA' => $apaCitation->citation_text,

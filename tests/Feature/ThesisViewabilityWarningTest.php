@@ -49,7 +49,7 @@ class ThesisViewabilityWarningTest extends TestCase
             'title'          => $title,
             'authors'        => 'A',
             'adviser'        => 'Adv',
-            'year_published' => 2026,
+            'year'           => 2026,
             'category_id'    => $this->category->id,
             'pdf_file'       => UploadedFile::fake()->createWithContent('t.pdf', $pdfBytes),
         ]);

@@ -17,7 +17,7 @@ class SearchController extends Controller
         $request->validate([
             'q'              => 'required|string|min:1',
             'category_id'    => 'nullable|exists:categories,id',
-            'year_published' => 'nullable|digits:4|integer',
+            'year'           => 'nullable|digits:4|integer',
             'status'         => 'nullable|in:active,restricted,archived',
         ]);
 
@@ -32,7 +32,7 @@ class SearchController extends Controller
         // only one status. A status the caller may not see returns nothing.
         $results = $this->searchService->search(
             $request->input('q'),
-            $request->only(['category_id', 'year_published']),
+            $request->only(['category_id', 'year']),
             Thesis::statusesRequestedBy($user, $request->input('status'))
         );
 

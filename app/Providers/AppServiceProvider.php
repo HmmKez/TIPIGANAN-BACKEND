@@ -32,6 +32,8 @@ class AppServiceProvider extends ServiceProvider
                     fixturePath:     $config['fixture'],
                     simulateOutage:  (bool) $config['simulate_outage'],
                 ),
+                // The school's list imported from a CSV - see App\Support\SchoolRoster.
+                'csv'  => new \App\Support\SchoolDirectory\CsvSchoolDirectory(),
                 'http' => new HttpSchoolDirectory(
                     baseUrl: (string) $config['url'],
                     apiKey:  $config['key'],

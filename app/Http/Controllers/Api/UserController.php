@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\User;
+use App\Support\SchoolRoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -16,7 +17,19 @@ class UserController extends Controller
     // Get all users — staff and above
     public function index(Request $request)
     {
+        // Search runs here, across every account: ID number (from the start,
+        // so "100" finds 10001, 10002…), name or email (anywhere in them).
+        $search = trim((string) $request->search);
+
         $users = User::with('roles', 'permissions')
+            // Only accounts that are in use. One still waiting to be activated
+            // at the library is not listed here (School Records shows it as
+            // "Not activated yet"); it appears once staff activate it.
+            ->where('needs_activation', false)
+            ->when($search !== '', fn($q) => $q->where(fn($w) => $w
+                ->where('id_number', 'like', addcslashes($search, '%_\\').'%')
+                ->orWhere('name', 'like', '%'.addcslashes($search, '%_\\').'%')
+                ->orWhere('email', 'like', '%'.addcslashes($search, '%_\\').'%')))
             ->when($request->role, fn($q) =>
                 $q->where('role', $request->role))
             ->when($request->status, fn($q) =>
@@ -36,8 +49,8 @@ class UserController extends Controller
 
     // A Super Admin changes an existing account's role.
     //
-    // Replaces the old "create a staff account" form. Everyone at the school
-    // registers themselves with their own ID number, so an admin inventing a
+    // Replaces the old "create a staff account" form. Every account is
+    // activated at the library from the school list, so an admin inventing a
     // second account for a colleague who already has one only creates a
     // duplicate person — and required the admin to set (and then convey) a
     // password for someone else. Promoting the account they already use avoids
@@ -136,7 +149,18 @@ class UserController extends Controller
             'status' => 'sometimes|in:active,deactivated',
         ]);
 
-        $user->update($request->only(['name', 'email', 'status']));
+        if ($request->input('status') === 'active' && $user->status !== 'active'
+            && SchoolRoster::isEnforced() && ! SchoolRoster::contains($user->id_number)) {
+            return response()->json([
+                'message' => "This account's ID number ({$user->id_number}) is not on the school's list, so it cannot be switched on.",
+            ], 422);
+        }
+
+        $changes = $request->only(['name', 'email', 'status']);
+        if ($request->has('status')) {
+            $changes['deactivated_by_roster'] = false;
+        }
+        $user->update($changes);
 
         AuditLog::create([
             'user_id'     => $request->user()->id,
@@ -192,7 +216,15 @@ class UserController extends Controller
     public function activate(Request $request, $id)
     {
         $user = User::findOrFail($id);
-        $user->update(['status' => 'active']);
+
+        // Switching it on would do nothing: sign-in still requires the list.
+        if (SchoolRoster::isEnforced() && ! SchoolRoster::contains($user->id_number)) {
+            return response()->json([
+                'message' => "This account's ID number ({$user->id_number}) is not on the school's list, so it cannot be switched on. Add it to the list and import it again - the account then switches back on by itself.",
+            ], 422);
+        }
+
+        $user->update(['status' => 'active', 'deactivated_by_roster' => false]);
 
         AuditLog::create([
             'user_id'     => $request->user()->id,
@@ -217,7 +249,8 @@ class UserController extends Controller
             ], 403);
         }
 
-        $user->update(['status' => 'deactivated']);
+        // By hand: a later school list will not switch it back on.
+        $user->update(['status' => 'deactivated', 'deactivated_by_roster' => false]);
 
         AuditLog::create([
             'user_id'     => $request->user()->id,
@@ -239,7 +272,8 @@ class UserController extends Controller
         ]);
 
         $user = User::findOrFail($id);
-        $user->update(['password' => Hash::make($request->password)]);
+        // A password someone else set: remind the owner to change it.
+        $user->update(['password' => Hash::make($request->password), 'must_change_password' => true]);
 
         AuditLog::create([
             'user_id'     => $request->user()->id,

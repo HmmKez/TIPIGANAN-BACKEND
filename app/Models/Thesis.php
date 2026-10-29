@@ -12,7 +12,7 @@ class Thesis extends Model
 
     protected $fillable = [
         'title', 'authors', 'adviser', 'abstract', 'keywords',
-        'year_published', 'category_id', 'pages', 'file_path', 'checksum',
+        'year', 'category_id', 'pages', 'file_path', 'checksum', 'original_checksum',
         'cover_image_path', 'status', 'uploaded_by',
         'ocr_status', 'ocr_completed_at',
     ];
@@ -71,7 +71,11 @@ class Thesis extends Model
             'adviser'        => $this->adviser,
             'abstract'       => $this->abstract,
             'keywords'       => $this->keywords,
-            'year_published' => $this->year_published,
+            // A number, not the "2024" string MySQL's YEAR type hands back:
+            // SearchService filters with an int, and Meilisearch never matches
+            // the number 2024 against the string "2024" - so every search with
+            // a year filter used to come back empty.
+            'year'           => $this->year ? (int) $this->year : null,
             'category_id'    => $this->category_id,
             // Without this, SearchService's whereIn('status', [...]) filter
             // matches nothing at all (the field doesn't exist on any

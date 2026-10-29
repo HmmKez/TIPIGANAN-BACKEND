@@ -33,6 +33,9 @@ final class DirectoryPerson
          * person. See Known Issue #24.
          */
         public readonly ?string $personKey = null,
+        // The first name as the school records it separately, when it does
+        // (the CSV roster). Preferred over guessing it from $fullName.
+        public readonly ?string $givenName = null,
     ) {
     }
 
@@ -49,7 +52,10 @@ final class DirectoryPerson
      */
     public function appRole(): string
     {
-        return in_array(strtolower($this->type), ['faculty', 'teacher', 'staff'], true)
+        // A staff or super_admin row on the school list also becomes a
+        // teacher-level account: getting an account never grants staff powers
+        // by itself. The Super Admin gives the role in User Management.
+        return in_array(strtolower($this->type), ['faculty', 'teacher', 'staff', 'super_admin'], true)
             ? 'teacher'
             : 'student';
     }
@@ -63,6 +69,10 @@ final class DirectoryPerson
      */
     public function firstName(): ?string
     {
+        if ($this->givenName) {
+            return $this->givenName;
+        }
+
         if (! $this->fullName) {
             return null;
         }
