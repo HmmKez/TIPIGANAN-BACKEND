@@ -26,6 +26,9 @@ findings still stand unless marked otherwise; this file lists what changed
 *since*.
 
 **Review log.**
+- **2026-10-29 — the team's newer `Downloads\CAPSTONE-GROUP7-revised2m.docx` (saved 10-27 02:37, with the 10-27 tracked changes accepted and reworded; all 8 placeholders replaced by screenshots) → `Downloads\CAPSTONE-GROUP7-revised2m - UPDATED 2.docx`** for §2.18: 129 tracked revisions, 41 "[NEW]" comments, 10 screenshot placeholders (4.2.1, 4.2.2, 4.2.3a/b, 5.1, 5.2a/b, 5.3, 5.20, 5.21). The earlier `- UPDATED.docx` is superseded (left in place). Also fixed the duplicate "Table 4.4.12" (School Roster → 4.4.13).
+- **2026-10-27 — `Downloads\CAPSTONE-GROUP7-revised2m.docx` (the team's newer draft, 108 pages; most of §2.1–2.16 already worked in by the team: use cases 6, 14, 15, 18, 19, 20, Figs 5.6/5.7/5.11/5.13/5.16, test count 196, year) → `Downloads\CAPSTONE-GROUP7-revised2m - UPDATED.docx`.** At the user's request the changes were **written into the copy as tracked changes** (author "Claude (update)", 136 revisions, 62 comments each starting "[NEW]") instead of only commented, with **placeholder pictures** ("NEW SCREENSHOT HERE" — right-click › Change Picture) for Figs 4.2.2, 4.2.3a/b, 5.2a/b, 5.3 and the new 5.20 School Records / 5.21 Starting Password Reminder. Written in: §2.17 throughout (scope, limitation, Ch III School Student Records System, UC1/13/20, **new UC21 Import School Records**, Table 4.4.1 two rows, **new Table 4.4.13 school_roster**, 4.5, 4.6 step 3, Figs 5.2/5.3/5.14, recommendation); §2.1 scope sentence ("soft delete" for archiving corrected); §2.5 Fig 5.7/5.16 Item Details; §2.9 Desktop/Mobile; §2.14/2.15 Table 4.4.3 adviser/year + OCR year in Ch III; §2.16 original_checksum row + Fig 5.13; test count 225/830. Comments only: Fig 4.1.1 (add UC21) and Fig 4.3.1 ER diagram. Scripts: `scratchpad/rev/update.ps1` + `updates.json`. Mark the entries reflected once the team accepts the changes.
+- **2026-10-20 — `DesktopCAPSTONE-GROUP7-revised2m.docx` reviewed** (103 pages, up from 74) → `DesktopCAPSTONE-GROUP7-revised2m - REVIEWED.docx`, 26 comments (green = new, yellow = still open). **Most of the 30 earlier comments were acted on:** staff-privileges sentence, background reading, the seven missing technologies, Manage User Accounts, the File a Scanned Thesis and Register Account use cases, the whole data dictionary (users, categories, enum values, OCR columns, bookmarks wording, settings key, signed_url_tokens), Chapter V rewritten with **51 new screenshots** and six new figures (User Management, Edit Item, Bookmarks, My Profile, Landing Page Management, Active Term), the 5.13 caption typo, Recommendations filled, appendices restored. **Partly reflected:** §2.2 (Fig 5.6 lists the status filter), §2.4 (Fig 5.16 — not yet the use case), §2.6 (Fig 5.7 archived notice), §2.8 (Fig 5.13 View/Discard — not yet the use case), §2.10 (CSV). **Still open:** §1 archiving in the scope, §2.1/2.3 use cases 14 and 15, §2.5 Item Details captions, §2.9 Desktop/Mobile, §2.11 test count (196), §2.12 Terms checkbox (now *in* the paper and the screenshot), §2.13 bulk actions, §2.14 adviser, §2.15 year, §2.16 duplicates; ER diagram and Fig 4.2.2 not re-exported.
 - **2026-10-08 — `CAPSTONE-7-CURRENT.docx` reviewed** → `CAPSTONE-7-CURRENT - REVIEWED.docx`
   (30 comments; green highlight = new since the last review, yellow = still
   open from it). The draft's text was almost unchanged from CAPSTONE-GROUP7
@@ -228,6 +231,110 @@ Each entry: what changed → where the paper probably mentions it → what to do
   "Export PDF includes Timestamp, User, Action, and Description").
 - Reported Items' "Resolved By" shows the ID number when an account has no name.
 - *Look for:* export, PDF export, audit log, resolved by.
+- [ ] reflected
+
+### 2.18 No self-registration: accounts are activated at the library  *(2026-10-29)*
+- **Now:** there is **no Register page**. A student or teacher goes to the
+  library with their school ID card; staff open **School Records → Activate an
+  Account**, enter the ID number, see the name the school's list holds for it
+  and confirm it against the ID card; then the person types **their own** email
+  and password on the staff computer. Only IDs on the imported list can be
+  activated; the role comes from the list (staff / Super Admin rows become
+  ordinary accounts, promoted in User Management). Every staff member can
+  activate by default (permission `activate_accounts`). The **starting password
+  (KEN_10001) is gone**, and so is its limitation. Accounts made under the old
+  self-registration must be activated again (they keep their bookmarks).
+- **Paper affected:** objective 1.3 ("must register"); scope (sign-up wording);
+  the starting-password limitation; Ch III School Student Records System;
+  **Use Case 20 Register Account → Activate Account** (actor: Repository Staff);
+  Use Cases 13 (password reminder after a reset; not-activated refusal) and 21
+  (activated, not registered); use case diagram; Figures 4.2.1–4.2.3 and
+  5.1–5.3, 5.14, 5.20, 5.21; data dictionary `users.needs_activation`,
+  `must_change_password` (now only after a reset), `school_roster.first_name`;
+  4.5 test count **210 (789 assertions)**; 4.6 step 3; the one-time-code
+  recommendation (replaced by a confirmation email).
+- *Look for:* register, registration, sign up, starting password, Get Started.
+- [ ] reflected (written into `- UPDATED 2.docx` as tracked changes)
+- **Supersedes the registration and starting-password parts of §2.17 below.**
+
+### 2.17 Access limited to the school's list (CSV), with a starting password  *(2026-10-27)*
+- **Now (built; switched on by setting the driver to csv):** the Super Admin
+  imports a CSV from the school's database (ID number, first name, last name,
+  role) on a new **School Records** page, with a preview first. Only ID numbers
+  on the list can register; the person enters their email and a **starting
+  password** — first three letters of the first name, "_", ID number, e.g.
+  KEN_10001, capitals ignored — and is then reminded on every page to change
+  it. Only accounts on the list can sign in or keep using the system, every
+  role included. Staff and Super Admin rows register as ordinary accounts and
+  are promoted by the Super Admin.
+- **Paper likely affected:** Chapter I scope (access limited to the school's
+  list); Register Account use case — the ID is checked against the imported
+  list, the Guest enters the starting password, and **the person's name is not
+  shown** during registration; Authentication use case (off-list accounts
+  refused; reminder to change the starting password); a new use case
+  **Import School Records** (Super Admin); data dictionary — new table
+  `school_roster` (id_number char 5 PK, first_name, last_name, role,
+  imported_at) and `users.must_change_password`; Chapter III, the "School
+  Student Records System" entry can say the records arrive as a CSV export;
+  a Chapter V figure for School Records.
+- **Re-importing (same day):** importing a new list **switches off** every
+  account whose ID is not on it (signed out, cannot sign in; password kept).
+  Accounts still on the list carry on with their own passwords. An account
+  switched off this way **is switched back on** when a later list has it again.
+  Accounts deactivated by staff by hand stay off. Paper: the Import School
+  Records use case (main flow + "accounts not on the new list are switched
+  off" / "returning accounts are switched back on"); Manage Users use case
+  (an account off the list cannot be activated by hand); data dictionary
+  `users.deactivated_by_roster`.
+- *Look for:* register, ID verification, school records, password.
+- [ ] reflected
+
+### 2.16 Duplicate uploads are prevented  *(2026-10-20)*
+- **Now:** the exact same file cannot be filed twice — on upload, from the scan
+  inbox, or as a replacement file — and staff are pointed to the item that
+  already has it (an archived one: "restore it instead"). A different file of
+  what looks like the same work — matching title (ignoring capitals,
+  punctuation and subtitle) **and** at least one author in common — brings up a
+  warning while typing and an "Upload anyway?" confirmation; staff decide.
+  Deleted items do not count.
+- **Paper likely affected:**
+  - Manage Thesis Records / upload use case and the suggested **File a Scanned
+    Thesis** use case: add alternative flows — identical file refused; possible
+    duplicate warned, confirm to continue; a refused scan stays in the inbox.
+  - Data dictionary, Table 4.4.3: new column **`original_checksum` char(64)** —
+    "fingerprint of the file as uploaded, used to refuse the same file twice";
+    and `checksum`'s description could note it is taken after the file is
+    prepared for viewing (used for the weekly integrity check).
+  - Figure 5.13 / upload steps: mention the duplicate warning.
+  - Testing (4.5): a defect-style finding worth one line — the existing
+    checksum could not detect duplicates because the viewer preparation step
+    rewrites files non-repeatably.
+- *Look for:* duplicate, checksum, upload, scan inbox.
+- [ ] reflected
+
+### 2.15 "Year Published" is now "Year" — optional, and read from the document  *(2026-10-20)*
+- **Now:** the field is called **Year** everywhere, because much of the
+  collection (special collections, institutional records, local creations) was
+  never published. It is **optional**: left blank at upload, the system reads it
+  from the document's front matter — a cover date ("December 2023"), an academic
+  year ("A.Y. 2023–2024", taking the later year), a copyright line, or the year
+  alone on a line — the same way it fills the abstract and keywords, never
+  overwriting a year staff typed. An item whose document states no year has
+  none; its citations say **"n.d."** (no date), and Reports groups it under
+  "No year".
+- **Paper likely affected:**
+  - Data dictionary, Table 4.4.3: `year_published year` → **`year` year,
+    nullable**, description e.g. "Year of the item, if known; read from the
+    document when left blank".
+  - Objectives (1.3): "Organize content by category and **date published**" →
+    "by category and year".
+  - Figure 5.13 / upload steps; Figure 5.7 / Item Details ("Shows the adviser,
+    **year**, department…" — only when present); Figure 5.6 / Browse filters
+    ("filter results by department and year" is already right).
+  - Chapter III, Tesseract.js / OCR description: it now also recovers the year,
+    not only the abstract and keywords.
+  - Citations (1.3 objective on APA and MLA): mention "n.d." for undated items.
+- *Look for:* published, year published, date published, publication year.
 - [ ] reflected
 
 ### 2.14 Adviser is optional  *(2026-10-12)*

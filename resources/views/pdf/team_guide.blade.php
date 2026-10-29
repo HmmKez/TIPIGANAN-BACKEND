@@ -289,7 +289,7 @@ feature/xxx -&gt; your individual work — branch off dev, merge back to dev</pr
   <tr><td>Backend Dev 1</td><td>feature/pdf-watermark</td><td>Server-side watermark stamping</td></tr>
   <tr><td>Backend Dev 2</td><td>feature/export-reports</td><td>Export audit logs and reports to PDF</td></tr>
   <tr><td>Backend Dev 2</td><td>feature/meilisearch-setup</td><td>Switch Scout driver to Meilisearch</td></tr>
-  <tr><td>Frontend Dev</td><td>feature/ui-auth</td><td>Login and register pages</td></tr>
+  <tr><td>Frontend Dev</td><td>feature/ui-auth</td><td>Login page (the register page was removed on 2026-10-29)</td></tr>
   <tr><td>Frontend Dev</td><td>feature/ui-browse</td><td>Homepage and thesis list</td></tr>
   <tr><td>Frontend Dev</td><td>feature/ui-viewer</td><td>PDF viewer with watermark overlay</td></tr>
   <tr><td>Frontend Dev</td><td>feature/ui-search</td><td>Search results and filters</td></tr>
@@ -406,31 +406,28 @@ npm run dev  <span class="cm"># runs at http://localhost:5173</span></pre>
   <tr><td>90005</td><td>Student <i>(no name set)</i></td><td>student2@tipiganan.com</td><td>password</td></tr>
   <tr><td>90006</td><td>Teacher <i>(no name set)</i></td><td>teacher2@tipiganan.com</td><td>password</td></tr>
 </table>
-<p style="font-size:11px; color:#718096;">Re-create them at any time with <code>php artisan db:seed --class=UserSeeder</code>. The last two deliberately have no name, matching what a real registration now produces — use them to catch anything that still assumes a name exists. Anywhere a name would be shown (including the PDF watermark) falls back to the ID number.</p>
-<p style="font-size:11px; color:#718096;">These six sit in a reserved <b>9xxxx</b> block that the school's real ID numbers will never use, and they are flagged <code>directory_exempt</code> — so switching on ID verification (section 5.4) can never lock you out of your own demo accounts.</p>
+<p style="font-size:11px; color:#718096;">Re-create them at any time with <code>php artisan db:seed --class=UserSeeder</code>. The last two deliberately have no name — use them to catch anything that still assumes a name exists. Anywhere a name would be shown (including the PDF watermark) falls back to the ID number.</p>
+<p style="font-size:11px; color:#718096;">These six sit in a reserved <b>9xxxx</b> block that the school's real ID numbers will never use, and they are flagged <code>directory_exempt</code> — so switching on ID verification (section 5.4) can never lock you out of your own demo accounts. <b>The one exception is the school list (CSV) in section 5.4: there nobody is exempt</b>, so the demo accounts must be on the imported list. The sample file includes all of them. <b>On Kent's machine only 90001–90004 can sign in</b> since 2026-10-29: every other account was set to need activation at the library (<code>php artisan accounts:require-activation --keep=90001 --keep=90002 --keep=90003 --keep=90004</code>). Your own database is not changed unless you run that command.</p>
 
-<h2 class="sub">5.4 ID number verification against the school's records <span style="font-size:11px; background:#1e8a5f; color:#fff; padding:2px 8px;">NEW</span></h2>
-<p>Registration can check that an ID number belongs to a real, currently-enrolled student or a current member of faculty before creating the account. The school's own system is not available yet, so this runs against a fixture — but the whole flow is built, and connecting the real thing later changes one file.</p>
-<p><b>You do not need to set anything up.</b> Verification is <b>off by default</b>, so after <code>git pull</code> and <code>php artisan migrate</code> everything behaves exactly as it did before. Switch it on only when you want to see it.</p>
+<h2 class="sub">5.4 Accounts are activated at the library, from the school's list <span style="font-size:11px; background:#1e8a5f; color:#fff; padding:2px 8px;">CHANGED 2026-10-29</span></h2>
+<p><b>There is no Register page.</b> Nobody can create an account online. A student or teacher goes to the library with their school ID card, and a staff member activates their account on the <b>School Records</b> page (Administration menu, every staff member has it by default):</p>
+<table class="doc-table">
+  <tr><th>Step</th><th>Who</th><th>What happens</th></tr>
+  <tr><td>1. ID number</td><td>Staff</td><td>Types the person's 5-digit ID number and presses <b>Look up</b>. Refused if it is not on the school's list, if it already has an active account (reset the password in User Management instead), or if staff deactivated that account by hand.</td></tr>
+  <tr><td>2. Confirm the name</td><td>Staff</td><td>The system shows the name the list holds for that ID number, and the role the account will get. Staff compare it with the school ID card and tick <b>"I've checked their school ID card"</b>. Continue stays disabled until they do.</td></tr>
+  <tr><td>3. Email and password</td><td>The person</td><td>Staff turn the screen around. The person types their own email and a password twice (8+ characters with upper-case, lower-case and a number). Staff never need to know it.</td></tr>
+  <tr><td>Done</td><td>—</td><td>The account is created; the audit trail records which staff member activated it. Everything typed is cleared for the next person. The person signs in with their ID number and that password.</td></tr>
+</table>
+<p><b>The school's list (CSV).</b> Activation only works for ID numbers on the list the Super Admin imported: a CSV exported from the school's database with a header row and the columns <code>id_number</code>, <code>first_name</code>, <code>last_name</code> (optional) and <code>role</code> (student, teacher, staff or super_admin). Only accounts on the list can sign in or keep using the system — <b>every role, staff and Super Admin included</b>. Nothing is enforced until a list is imported. To try it: <code>SCHOOL_DIRECTORY_DRIVER=csv</code> (the default in <code>.env.example</code> now), <code>php artisan config:clear</code>, then <code>php artisan school:import-roster database/fixtures/school-roster-sample.csv</code>. The sample holds all the demo accounts plus test people you can activate: 10003 Ma. Teresa, 10004 Niño, 00042 Rowena Mae, 20001 Angela (teacher), 20002 Josefina (staff row).</p>
+<p><b>Earlier accounts.</b> Accounts made under the old self-registration can be set to need activation (<code>php artisan accounts:require-activation --keep=ID …</code>). They cannot sign in until activated; activating keeps the same account (bookmarks, history) and gives it the new email and password. Until then they are not listed in User Management; School Records shows them as "Not activated yet".</p>
+<p><b>Importing a new list</b> (each semester): accounts still on it carry on with their own passwords. Every account <b>not</b> on it is <b>switched off</b> — signed out at once and unable to sign in; its password is kept. If a later list has that ID again, the account <b>switches back on by itself</b>. An account staff deactivated by hand stays off, and an account off the list cannot be activated by hand. The preview on the School Records page lists both groups before anything changes.</p>
 <table class="doc-table">
   <tr><th>Setting in .env</th><th>What happens</th></tr>
-  <tr><td><code>SCHOOL_DIRECTORY_DRIVER=off</code></td><td><b>Default.</b> No checking. Registration works as it always has, and the person picks their own role.</td></tr>
-  <tr><td><code>SCHOOL_DIRECTORY_DRIVER=fake</code></td><td>Checks against <code>database/fixtures/school-directory.json</code>. This is what to use for demos and for the defense.</td></tr>
-  <tr><td><code>SCHOOL_DIRECTORY_DRIVER=http</code></td><td>The school's real system. Needs <code>SCHOOL_DIRECTORY_URL</code> and usually <code>SCHOOL_DIRECTORY_KEY</code>. Not usable until their developer provides them.</td></tr>
-  <tr><td><code>SCHOOL_DIRECTORY_UNAVAILABLE=true</code></td><td>Pretends the school's system is down, so you can show the refusal on demand. Works with the <code>fake</code> driver only.</td></tr>
+  <tr><td><code>SCHOOL_DIRECTORY_DRIVER=csv</code></td><td><b>Default.</b> The school list is enforced at sign-in (once imported).</td></tr>
+  <tr><td><code>SCHOOL_DIRECTORY_DRIVER=off</code></td><td>The list is not checked at sign-in. Activation still requires the list.</td></tr>
+  <tr><td><code>fake</code> / <code>http</code></td><td>Left from the earlier plan of checking IDs against the school's own system through an API. No screen uses them since registration was removed; kept in case the school provides an API later.</td></tr>
 </table>
-<p><b>Test ID numbers</b> (with <code>SCHOOL_DIRECTORY_DRIVER=fake</code>) — the fixture deliberately includes the awkward cases, not just working ones:</p>
-<table class="doc-table">
-  <tr><th>ID Number</th><th>What it is</th><th>Result</th></tr>
-  <tr><td>10234</td><td>Enrolled student</td><td>Accepted — "Welcome, Juan", registers as a Student</td></tr>
-  <tr><td>20101</td><td>Current faculty</td><td>Accepted — "Welcome, Ramon", registers as a Teacher</td></tr>
-  <tr><td>00042</td><td>Enrolled, leading zero</td><td>Accepted — proves the ID is not being treated as a number</td></tr>
-  <tr><td>10791</td><td>Stored surname-first</td><td>Accepted — greets "Rowena", not "Otadoy,"</td></tr>
-  <tr><td>10001</td><td>Graduated</td><td>Refused — no longer active</td></tr>
-  <tr><td>20099</td><td>Resigned faculty</td><td>Refused — no longer active</td></tr>
-  <tr><td>77777</td><td>Not in the records at all</td><td>Refused — not found</td></tr>
-</table>
-<p style="font-size:11px; color:#718096;"><b>Two things worth knowing before you change anything here.</b> First, the role is no longer the registrant's to choose — when verification is on, it comes from the school's records, because previously anyone could tick "Teacher" and get teacher-level access. Second, signing in never calls the school; it reads a column kept up to date separately. Putting their server in the login path would mean nobody could sign in whenever their system was slow or down.</p>
+<p style="font-size:11px; color:#718096;"><b>Three things not to undo.</b> (1) Activation never grants staff or Super Admin powers: those rows become teacher-level accounts, and the Super Admin gives the role in User Management. (2) The person types the password, not the staff member — the panel clears every field after each attempt, and the boxes use <code>autocomplete="new-password"</code> so the browser on the desk does not save them. (3) The import refuses a list that leaves out the Super Admin doing it, and asks for confirmation when a list is under 80% of the previous one — both to stop a bad file locking everyone out. The starting password (KEN_10001) and the public ID check from the week before are gone: anyone who knew someone's name and ID number could have registered as them.</p>
 <p style="font-size:11px; color:#718096;">The test suite pins the driver to <code>off</code> in <code>phpunit.xml</code> regardless of your <code>.env</code>, so switching your own machine to <code>fake</code> will not break anyone's tests. Tests that need verification switch it on themselves.</p>
 
 <h2 class="sub">5.5 Scan inbox — filing a scanned thesis <span style="font-size:11px; background:#1e8a5f; color:#fff; padding:2px 8px;">NEW</span></h2>
@@ -610,8 +607,6 @@ const openThesis = async (thesisId) => {
   <span class="badge get">GET</span> /search?q=keyword &nbsp;&nbsp;
   <span class="badge get">GET</span> /theses/{id}/citations &nbsp;&nbsp;
   <span class="badge get">GET</span> /theses/{id}/citations/generate<br>
-  <span class="badge post">POST</span> /auth/register/verify &nbsp;&nbsp;
-  <span class="badge post">POST</span> /auth/register &nbsp;&nbsp;
   <span class="badge post">POST</span> /auth/login
 </div>
 <h3 class="subsub">Who can see which items — one rule, applied everywhere</h3>
@@ -624,7 +619,7 @@ const openThesis = async (thesisId) => {
 </table>
 <p style="font-size:11px; color:#718096;">The rule lives in one place, <code>Thesis::visibleStatusesFor()</code>, and applies to <code>GET /theses</code>, <code>GET /theses/{id}</code>, <code>GET /search</code> and <b>reading the PDF</b> (<code>POST /theses/{id}/view-token</code>) — so staff can read an archived thesis, and nobody else can. It also governs <code>?status=</code> on both the list and search: asking for a status you are not allowed to see returns <b>nothing</b>, rather than the rule being skipped. Browse's <b>Status</b> filter (staff and super admin only) is this parameter. Two bugs here were fixed on 2026-09-22 — <code>?status=archived</code> used to be honoured for anyone including guests, and archived items were hidden from staff too, which made the Edit screen fail to open for anything archived. On 2026-10-07 search and reading were brought under the same rule, and a leak was closed: the Archive button did not update the search index, so <b>guests could still find archived work by searching</b>. Search now also re-checks each result's status against the database, so a stale index can no longer show anything it shouldn't. If Meilisearch has been reset or was down while items changed, rebuild it: <code>php artisan scout:sync-index-settings</code> then <code>php artisan scout:import "App\Models\Thesis"</code>.</p>
 
-<p style="font-size:11px; color:#718096;"><code>/auth/register/verify</code> is step one of registration — it checks an ID number against the school's records before the sign-up form asks for anything else. See section 5.4.</p>
+<p style="font-size:11px; color:#718096;">There is <b>no registration endpoint</b>. Accounts are activated by staff at the library: <code>POST /accounts/activation/lookup</code> and <code>POST /accounts/activation</code> (staff and Super Admin, permission <code>activate_accounts</code>). See section 5.4.</p>
 
 <h2 class="sub">8.2 Protected endpoints — all logged-in users</h2>
 <div class="badge-row">
