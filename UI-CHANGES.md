@@ -288,3 +288,134 @@ in `PROJECT-STATUS.md` instead.
   password so staff can check it before saving (eye with a slash while shown).
   Hidden by default; it does not submit or close the dialog.
 - **Commit:** _(not yet pushed)_
+
+## 2026-11-04
+
+### 14. User Management — staff no longer see Reset Password on staff and Super Admin rows
+- **Screen:** User Management → Actions (staff with the reset permission).
+- **Before:** Reset Password appeared on every row, including Super Admins.
+- **Now:** for staff it appears only on student and teacher rows. The Super Admin
+  still sees it on every row.
+- **Commit:** _(not yet pushed)_
+
+### 15. Activate an Account — new refusal for earlier staff and Super Admin accounts
+- **Screen:** School Records → Activate an Account (staff).
+- **Before:** staff could activate a waiting staff or Super Admin account.
+- **Now:** Look up shows "ID number … has an earlier staff or Super Admin account,
+  so only a Super Admin can activate it." The Super Admin sees the normal steps.
+- **Commit:** _(not yet pushed)_
+
+### 16. A deactivated user is signed out on their next action
+- **Screen:** any signed-in screen (the deactivated user).
+- **Before:** they could keep using the system for up to 7 days, although the
+  Deactivate dialog said they would be signed out.
+- **Now:** their next request sends them to the login page, as the dialog says.
+  The login page does not yet explain why.
+- **Commit:** _(not yet pushed)_
+
+### 17. Activate an Account — "same person or different person"
+- **Screen:** School Records → Activate an Account (staff and Super Admin).
+- **Before:** an earlier account's old name was never shown or compared.
+- **Now:** when the earlier account's name differs from the list, a warning shows
+  the old name and two choices: **Same person, the name was corrected** (keeps
+  bookmarks and history) or **Different person** (new account; the old one stays
+  closed). Continue stays off until one is chosen. The role shown updates with
+  the choice. The earlier-account note appears only when the names match.
+- **Commit:** _(not yet pushed)_
+
+### 18. Activate an Account — one more refusal
+- **Screen:** School Records → Activate an Account (staff).
+- **Before:** staff could turn on a waiting account that staff had deactivated.
+- **Now:** Look up says only a Super Admin can activate it.
+- **Commit:** _(not yet pushed)_
+
+### 19. School Records — import preview shows name and role changes, true totals
+- **Screen:** School Records → Import a new list (Super Admin).
+- **Before:** no word about changed names or roles; counts stopped at 50.
+- **Now:** new sections list accounts with a **different name** (old → new, must
+  be activated again) and accounts changing **between student and teacher**. If
+  your own name differs, a note says it will update and you stay signed in. Every
+  count is the true total, with "Showing the first 50 of N" under long lists. The
+  confirmation and the result message mention all of this. The "not on the list"
+  warning uses the true total too.
+- **Commit:** _(not yet pushed)_
+
+### 20. My Profile — name is read-only
+- **Screen:** My Profile → Personal Info (everyone).
+- **Before:** Full Name could be edited and was required.
+- **Now:** it is greyed out, with "From the school's list. If it is wrong, please
+  visit the library." Email can still be changed.
+- **Commit:** _(not yet pushed)_
+
+### 21. User Management — tabs and tiles cover every account
+- **Screen:** User Management (staff and Super Admin).
+- **Before:** tabs only filtered the 15 accounts on the current page, so they
+  could look empty, and the tiles said "(page)" or "(shown)".
+- **Now:** tabs search every account, with correct paging. The tiles read **Total
+  Users, Active, Deactivated, Staff & Admins** and are true totals of activated
+  accounts, whatever filter is on.
+- **Commit:** _(not yet pushed)_
+
+### 22. Activate an Account — "Different person" asks for confirmation
+- **Screen:** School Records → Activate an Account (staff and Super Admin).
+- **Before:** Continue went straight on to email and password.
+- **Now:** a dialog, "Start a new account for [name]?", says the old account is
+  closed for good and its bookmarks and history stay with it. **Yes, different
+  person** goes on; **Cancel** returns to the same step with nothing changed.
+  "Same person" has no extra question.
+- **Commit:** _(not yet pushed)_
+
+### 23. Login — Remember me removed
+- **Screen:** Login (everyone).
+- **Before:** a Remember me checkbox that did nothing.
+- **Now:** no checkbox.
+- **Commit:** _(not yet pushed)_
+
+### 24. Login — says when you were signed out
+- **Screen:** Login (anyone whose session ended).
+- **Before:** they landed on the login page with no explanation.
+- **Now:** a warning says "You have been signed out. Please sign in again." It
+  shows once and goes away on reload. Trying to sign in then gives the specific
+  reason, such as a deactivated account.
+- **Commit:** _(not yet pushed)_
+
+### 25. User Management — Reset Password and Change Role dialogs
+- **Screen:** User Management → Actions (staff and Super Admin; Change Role is
+  Super Admin only).
+- **Before:** Cancel on Reset Password kept the typed password for the next
+  account's dialog; Change Role said everyone signs up themselves.
+- **Now:** Cancel clears the boxes. Change Role says everyone is activated at the
+  library from the school's list.
+- **Commit:** _(not yet pushed)_
+
+### 26. Admin Dashboard and Reports — "Activated Accounts"
+- **Screen:** Admin Dashboard, Reports (staff and Super Admin).
+- **Before:** "Registered Users" counted every account, including those waiting
+  to be activated.
+- **Now:** "Activated Accounts" counts only accounts in use. The Users figure on
+  the public landing page and the report PDF's Total Users use the same count.
+- **Commit:** _(not yet pushed)_
+
+## 2026-11-04 (continued)
+
+### 27. School Records — Download full list
+- **Screen:** School Records (Super Admin).
+- **Before:** only the first 50 names of each section could be seen, and nothing
+  said that skipped rows stop at 200.
+- **Now:** the preview has **one** button above Import this list, "Download full
+  lists (3 files)" (the number depends on the file), which saves a separate CSV for
+  each section that applies: switched off, different name, role change, switched
+  back on, skipped rows. With one section it reads "Download full list". The "not on
+  the list" warning under Current list has its own button. Skipped rows also say
+  "Showing the first 200 of N" when there are more. Each section had its own button
+  at first; the user asked for one.
+- **Commit:** _(not yet pushed)_
+
+### 28. School Records — long lists are folded
+- **Screen:** School Records, import preview and Current list (Super Admin).
+- **Before:** up to 50 names per section, and up to 200 skipped rows, were always
+  on screen, so Import this list could be a long way down.
+- **Now:** a section with more than 10 names shows its count and a **Show the first
+  50** link (**Show all N** when there are 50 or fewer), which changes to **Hide the
+  names**. Sections with 10 or fewer still show the names straight away.
+- **Commit:** _(not yet pushed)_

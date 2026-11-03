@@ -26,6 +26,7 @@ findings still stand unless marked otherwise; this file lists what changed
 *since*.
 
 **Review log.**
+- **2026-11-04 — `Desktop\CAPSTONE-GROUP7-FINALCURRENT.docx` (119 pages) compared with the system → `- REVIEWED.docx` (yellow highlight, comments, tracked changes) and `- UPDATED.docx` (same corrections, no markup).** The team had reflected §2.18 well: Activate Account (Use Case 20), a rewritten 3.1, a re-exported Figure 3.1.1 and ER diagram, new activation, login, School Records and reminder screenshots. **Still needed, and written in:** test count 214/811; 3.1 said access rules happen in the presentation layer (they are enforced in the application layer); guests can search and cite (1.3, 3.1, Use Case 18); Tailwind is not loaded (Ch III); eleven permissions, two of them grantable; User Management lists only activated accounts and searches by ID (Use Case 1, Fig 5.14); Use Case 17's reason is optional, so its alternative flow could never happen; Use Case 12 refuses duplicate replacement files; Use Case 20 two more refusals; category code is required (Table 4.4.2); Fig 5.20 refers to 5.2a–c, pages 10 per page; 4.7 needs the worker and scheduler; several typos. **Team must redo:** the use case diagram (Fig 4.1.1 still has Register Account, lacks Activate Account and Import School Records); Fig 5.14 screenshots (show accounts no longer listed); Fig 3.1.1's guest box. **System leftovers found:** the Change Role dialog still says "everyone signs up themselves"; the "Registered Users" tiles on the Admin Dashboard and Reports count accounts not yet activated.
 - **2026-10-29 — the team's newer `Downloads\CAPSTONE-GROUP7-revised2m.docx` (saved 10-27 02:37, with the 10-27 tracked changes accepted and reworded; all 8 placeholders replaced by screenshots) → `Downloads\CAPSTONE-GROUP7-revised2m - UPDATED 2.docx`** for §2.18: 129 tracked revisions, 41 "[NEW]" comments, 10 screenshot placeholders (4.2.1, 4.2.2, 4.2.3a/b, 5.1, 5.2a/b, 5.3, 5.20, 5.21). The earlier `- UPDATED.docx` is superseded (left in place). Also fixed the duplicate "Table 4.4.12" (School Roster → 4.4.13).
 - **2026-10-27 — `Downloads\CAPSTONE-GROUP7-revised2m.docx` (the team's newer draft, 108 pages; most of §2.1–2.16 already worked in by the team: use cases 6, 14, 15, 18, 19, 20, Figs 5.6/5.7/5.11/5.13/5.16, test count 196, year) → `Downloads\CAPSTONE-GROUP7-revised2m - UPDATED.docx`.** At the user's request the changes were **written into the copy as tracked changes** (author "Claude (update)", 136 revisions, 62 comments each starting "[NEW]") instead of only commented, with **placeholder pictures** ("NEW SCREENSHOT HERE" — right-click › Change Picture) for Figs 4.2.2, 4.2.3a/b, 5.2a/b, 5.3 and the new 5.20 School Records / 5.21 Starting Password Reminder. Written in: §2.17 throughout (scope, limitation, Ch III School Student Records System, UC1/13/20, **new UC21 Import School Records**, Table 4.4.1 two rows, **new Table 4.4.13 school_roster**, 4.5, 4.6 step 3, Figs 5.2/5.3/5.14, recommendation); §2.1 scope sentence ("soft delete" for archiving corrected); §2.5 Fig 5.7/5.16 Item Details; §2.9 Desktop/Mobile; §2.14/2.15 Table 4.4.3 adviser/year + OCR year in Ch III; §2.16 original_checksum row + Fig 5.13; test count 225/830. Comments only: Fig 4.1.1 (add UC21) and Fig 4.3.1 ER diagram. Scripts: `scratchpad/rev/update.ps1` + `updates.json`. Mark the entries reflected once the team accepts the changes.
 - **2026-10-20 — `DesktopCAPSTONE-GROUP7-revised2m.docx` reviewed** (103 pages, up from 74) → `DesktopCAPSTONE-GROUP7-revised2m - REVIEWED.docx`, 26 comments (green = new, yellow = still open). **Most of the 30 earlier comments were acted on:** staff-privileges sentence, background reading, the seven missing technologies, Manage User Accounts, the File a Scanned Thesis and Register Account use cases, the whole data dictionary (users, categories, enum values, OCR columns, bookmarks wording, settings key, signed_url_tokens), Chapter V rewritten with **51 new screenshots** and six new figures (User Management, Edit Item, Bookmarks, My Profile, Landing Page Management, Active Term), the 5.13 caption typo, Recommendations filled, appendices restored. **Partly reflected:** §2.2 (Fig 5.6 lists the status filter), §2.4 (Fig 5.16 — not yet the use case), §2.6 (Fig 5.7 archived notice), §2.8 (Fig 5.13 View/Discard — not yet the use case), §2.10 (CSV). **Still open:** §1 archiving in the scope, §2.1/2.3 use cases 14 and 15, §2.5 Item Details captions, §2.9 Desktop/Mobile, §2.11 test count (196), §2.12 Terms checkbox (now *in* the paper and the screenshot), §2.13 bulk actions, §2.14 adviser, §2.15 year, §2.16 duplicates; ER diagram and Fig 4.2.2 not re-exported.
@@ -231,6 +232,56 @@ Each entry: what changed → where the paper probably mentions it → what to do
   "Export PDF includes Timestamp, User, Action, and Description").
 - Reported Items' "Resolved By" shows the ID number when an account has no name.
 - *Look for:* export, PDF export, audit log, resolved by.
+- [ ] reflected
+
+### 2.21 Smaller account details  *(2026-11-04)*
+- **Now:** a password reset signs the person out everywhere. Passwords are limited
+  to 72 characters. "Different person" at the desk asks for confirmation. The login
+  page has **no Remember me** and says when someone was signed out. The Dashboard
+  and Reports tiles read **Activated Accounts** and count only accounts in use.
+- **Paper affected:** login figure(s) if a screenshot shows Remember me; Admin
+  Dashboard and Reports figures (tile label); Fig 5.14 Change Role screenshot (the
+  wording is now corrected, as the 2026-11-04 review asked); Use Case 1 (a reset
+  signs the person out); Use Case 20 (the confirmation); 4.5 test count **263 (1160
+  assertions)**, replacing the figures in §2.19 and §2.20.
+- **Also:** the School Records preview lists the first 50 names of each section and has
+  one **Download full lists** button, saving a separate CSV per section, (Use Case 21, Fig 5.20).
+- *Look for:* Remember me, Registered Users, reset password.
+- [ ] reflected
+
+### 2.20 Going live, and what a new school list changes  *(2026-11-04)*
+- **Now:** the first Super Admin is created once with a command on the server;
+  demo accounts are not created on a live system. A new list **updates roles**
+  between student and teacher (never staff or Super Admin). If an account's name
+  differs from the list, it must be **activated again**; at the desk staff choose
+  **same person** (keeps bookmarks and history, takes the new name) or **different
+  person** (new account; the old one is closed but kept). Names come only from the
+  list: **users can no longer edit their name** in My Profile. Name lookups at the
+  desk are recorded in the audit log and limited to 30 a minute. Staff cannot
+  activate a waiting account that staff deactivated. User Management tabs and tiles
+  cover every account.
+- **Paper affected:** Use Case 1 (tabs, tiles); Use Case 13 or the My Profile use
+  case (name not editable); Use Case 20 (same or different person; one more
+  refusal; the role comes from the list for earlier accounts too); Use Case 21
+  (preview shows name and role changes; what an import does to them); 4.6 and 4.7
+  (the first Super Admin command, no demo accounts when live); Fig 5.14 (tile
+  labels), Fig 5.20 (preview and desk), My Profile figure (greyed-out name); 4.5
+  test count **250 (1074 assertions)**, replacing the figure in §2.19.
+- *Look for:* edit profile, full name, import, earlier account, deployment.
+- [ ] reflected
+
+### 2.19 Limits on staff, deactivation, and names in the school list  *(2026-11-04)*
+- **Now:** staff can reset the password of **students and teachers only**; the
+  Super Admin can reset anyone. Staff cannot activate an earlier **staff or Super
+  Admin** account; only the Super Admin can. **Deactivating signs the person out
+  straight away.** The school list accepts Excel's ordinary CSV as well as CSV
+  UTF-8, so names with ñ read correctly.
+- **Paper affected:** Use Case 1 (reset limits, deactivation signs out); Use Case
+  20 Activate Account (one more refusal in its alternative flows); Use Case 21
+  and the import step in 4.6 (either CSV format is accepted); Fig 5.14 if a
+  screenshot shows staff with Reset Password on a staff or Super Admin row; 4.5
+  test count **226 (889 assertions)**.
+- *Look for:* reset password, deactivate, CSV UTF-8, Activate Account alternative flows.
 - [ ] reflected
 
 ### 2.18 No self-registration: accounts are activated at the library  *(2026-10-29)*
