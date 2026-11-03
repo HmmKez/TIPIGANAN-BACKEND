@@ -978,6 +978,20 @@ User reported (screenshot, Collection Management): opening a row's Actions menu 
 - **Second, older bug found by the same check:** the catcher sat at z-index 60, below the sidebar (100), so clicking the sidebar while a menu was open left the menu hanging open. Catcher → 101, menu → 102; modals (1000) stay above both.
 - **Verified** at 1366 / 1024 / 768 / 375 px on Collections, Categories and Users: every menu item is the topmost element at its own centre, and a click outside closes the menu. **The check was confirmed to fail on the old component** — at 1024 px it reported exactly the three items in the user's screenshot as covered. Reported Items uses the same component but had no open reports to test with; Audit Logs' row button opens a details modal, not a menu.
 
+### Paper and guides brought up to date (2026-11-04)
+Paper: `Desktop\CAPSTONE-GROUP7-FINALCURRENT - REVIEWED 2.docx` and `- UPDATED 2.docx`, made from `- UPDATED.docx`, which is unchanged; see the `PAPER-CHANGES.md` review log. Team guide and functionalities sources corrected (name no longer editable, who can reset passwords, the 72-character limit, new-list behaviour, downloads, `deploy/`) and both PDFs regenerated. The blueprint PDF was not touched.
+
+### Prepared for deployment; host still undecided (2026-11-04)
+- **`deploy/`:** `README.md` (the guide), `provision.sh` (first-time setup of Ubuntu 24.04), `update.sh`, `make-env.sh` (`.env` with random passwords), `backup-offsite.sh`, and the Nginx, PHP, systemd and cron files. One domain: website at `/`, API at `/api`.
+- **`php artisan deploy:check`:** new read-only health check of settings, database, files, tools, services, stuck documents, backup age, Super Admin and demo accounts. Exit code 1 on any FAIL. `DeployCheckTest` (6).
+- **Fixed in the template:** `QUEUE_CONNECTION=database` (was `sync`, which would run a 4m41s scan inside the upload), `DB_QUEUE_RETRY_AFTER=1000` (was 90 against a 900s job), daily logs kept 14 days (a single file grew without limit), school list and scan inbox settings.
+- **Fixed in OCR:** Tesseract saved its language file in whichever folder it ran from, which the web user may not be able to write to on a server. It now uses `storage/app/ocr-cache`. First read needs internet.
+- **Verified:** from a separate copy in production mode on this Windows machine, against a throwaway MySQL database: `make-env.sh`, `composer install --no-dev`, `npm ci --omit=dev`, migrate, seed (no demo accounts), all four caches, a real `queue:work` running OCR on a scanned PDF, backup, `schedule:run`, login, and a watermarked PDF view through the API.
+- **NOT verified:** the scripts have never run on Linux (no Docker or WSL here; only `bash -n` syntax checks and reading them through). That covers `provision.sh`, `update.sh`, `backup-offsite.sh`, the Nginx, systemd and cron files, https, a real 150 MB upload through Nginx, and memory use on a 2 GB server. **Expect to correct something on the first real run.**
+
+### School Records: Hide on the "not on the list" warning (2026-11-04)
+Frontend only (`NotOnListWarning` in `SchoolRecordsPage.jsx`). Hiding stores the list's `imported_at` in `localStorage`, so it applies to one browser and one list; a new import has a different time and shows the warning again. The count stays visible with a Show link. Browser check, 8 steps on a throwaway MySQL database: all passed. Not run with browser storage blocked; the code is written to keep the warning shown in that case.
+
 ### School Records: download the full list of who an import affects (2026-11-04)
 The screen lists 50 names per section, and a school's list runs to thousands, so the preview has one button that saves a separate CSV per section (first built as one button per section; the user asked for one), and the "not on the list" warning has its own. A real browser may ask once to allow several downloads from the site; not seen in the headless check. Endpoints: `POST /school-roster/preview/download` (with the file and a `section`) and `GET /school-roster/not-on-list/download`, Super Admin only. Streams a UTF-8 CSV, changes no account, and writes `download_school_list` to the audit log. ID numbers with leading zeros are written as text so Excel keeps them; names are protected against formulas with `AuditCsv::safe`. Skipped rows now also say "Showing the first 200 of N".
 - **Tests:** suite **262 tests, 1141 assertions**, all passing, including 7,001 accounts on the test database.
@@ -1497,6 +1511,7 @@ Organized by capability area, describing **the system as it stands today** — n
 
 ## 7. Deploy Readiness Checklist
 
+> **2026-11-04:** the steps below are now scripted. Use `deploy/README.md` first; this list explains why each step matters.
 From the deploy-readiness diagnostic. **Tier 1 = must-do before going live; Tier 2 = strongly recommended; Tier 3 = quality/completeness.** In-repo prep for Tier 1 (#4 CORS, #5 https/proxy, env templates) is DONE (see §3); the items below are what remains **on the server at deploy time**. Not deploying yet as of 2026-07-12 — this is the guide for when the host is chosen (host still undecided; shortlist discussed: DigitalOcean 2GB Singapore via GitHub Student Pack, Oracle Always Free, or Hetzner).
 
 ### Tier 1 — deploy-blocking (server-side)

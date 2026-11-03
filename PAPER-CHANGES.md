@@ -26,6 +26,7 @@ findings still stand unless marked otherwise; this file lists what changed
 *since*.
 
 **Review log.**
+- **2026-11-04 (later) — §2.19 to §2.22 written into copies of `Desktop\CAPSTONE-GROUP7-FINALCURRENT - UPDATED.docx` → `- REVIEWED 2.docx` (85 tracked changes, 39 comments, yellow highlight) and `- UPDATED 2.docx` (the same text with no markup; accepting every change in the first gives exactly the second).** Written in: Use Cases 1, 13, 16, 20, 21; Tables 4.4.1 name, email, id_number and needs_activation; 4.5 test count 269/1183 and new test areas; 4.6 step 3 and the closing paragraph; Figs 5.2, 5.4, 5.14, 5.17, 5.20 descriptions. **Team must do:** retake the screenshots named in the comments (5.3 if it shows Remember me, 5.4 and 4.2.4, 5.9 and 4.2.7, 5.14, 5.17, 5.20), decide what 4.6 step 1 says about Vercel once a host is chosen, and update the table of contents in Word, as the paper grew from 120 to 123 pages.
 - **2026-11-04 — `Desktop\CAPSTONE-GROUP7-FINALCURRENT.docx` (119 pages) compared with the system → `- REVIEWED.docx` (yellow highlight, comments, tracked changes) and `- UPDATED.docx` (same corrections, no markup).** The team had reflected §2.18 well: Activate Account (Use Case 20), a rewritten 3.1, a re-exported Figure 3.1.1 and ER diagram, new activation, login, School Records and reminder screenshots. **Still needed, and written in:** test count 214/811; 3.1 said access rules happen in the presentation layer (they are enforced in the application layer); guests can search and cite (1.3, 3.1, Use Case 18); Tailwind is not loaded (Ch III); eleven permissions, two of them grantable; User Management lists only activated accounts and searches by ID (Use Case 1, Fig 5.14); Use Case 17's reason is optional, so its alternative flow could never happen; Use Case 12 refuses duplicate replacement files; Use Case 20 two more refusals; category code is required (Table 4.4.2); Fig 5.20 refers to 5.2a–c, pages 10 per page; 4.7 needs the worker and scheduler; several typos. **Team must redo:** the use case diagram (Fig 4.1.1 still has Register Account, lacks Activate Account and Import School Records); Fig 5.14 screenshots (show accounts no longer listed); Fig 3.1.1's guest box. **System leftovers found:** the Change Role dialog still says "everyone signs up themselves"; the "Registered Users" tiles on the Admin Dashboard and Reports count accounts not yet activated.
 - **2026-10-29 — the team's newer `Downloads\CAPSTONE-GROUP7-revised2m.docx` (saved 10-27 02:37, with the 10-27 tracked changes accepted and reworded; all 8 placeholders replaced by screenshots) → `Downloads\CAPSTONE-GROUP7-revised2m - UPDATED 2.docx`** for §2.18: 129 tracked revisions, 41 "[NEW]" comments, 10 screenshot placeholders (4.2.1, 4.2.2, 4.2.3a/b, 5.1, 5.2a/b, 5.3, 5.20, 5.21). The earlier `- UPDATED.docx` is superseded (left in place). Also fixed the duplicate "Table 4.4.12" (School Roster → 4.4.13).
 - **2026-10-27 — `Downloads\CAPSTONE-GROUP7-revised2m.docx` (the team's newer draft, 108 pages; most of §2.1–2.16 already worked in by the team: use cases 6, 14, 15, 18, 19, 20, Figs 5.6/5.7/5.11/5.13/5.16, test count 196, year) → `Downloads\CAPSTONE-GROUP7-revised2m - UPDATED.docx`.** At the user's request the changes were **written into the copy as tracked changes** (author "Claude (update)", 136 revisions, 62 comments each starting "[NEW]") instead of only commented, with **placeholder pictures** ("NEW SCREENSHOT HERE" — right-click › Change Picture) for Figs 4.2.2, 4.2.3a/b, 5.2a/b, 5.3 and the new 5.20 School Records / 5.21 Starting Password Reminder. Written in: §2.17 throughout (scope, limitation, Ch III School Student Records System, UC1/13/20, **new UC21 Import School Records**, Table 4.4.1 two rows, **new Table 4.4.13 school_roster**, 4.5, 4.6 step 3, Figs 5.2/5.3/5.14, recommendation); §2.1 scope sentence ("soft delete" for archiving corrected); §2.5 Fig 5.7/5.16 Item Details; §2.9 Desktop/Mobile; §2.14/2.15 Table 4.4.3 adviser/year + OCR year in Ch III; §2.16 original_checksum row + Fig 5.13; test count 225/830. Comments only: Fig 4.1.1 (add UC21) and Fig 4.3.1 ER diagram. Scripts: `scratchpad/rev/update.ps1` + `updates.json`. Mark the entries reflected once the team accepts the changes.
@@ -234,6 +235,11 @@ Each entry: what changed → where the paper probably mentions it → what to do
 - *Look for:* export, PDF export, audit log, resolved by.
 - [ ] reflected
 
+### 2.22 Deployment preparation  *(2026-11-04)*
+- **Now:** `deploy/README.md` holds the setup for one Ubuntu server: Nginx and PHP-FPM, MySQL, a queue worker for OCR, a scheduler for backups and file checks, and optional Meilisearch and Redis. The hosting decision is still open.
+- **Paper affected:** 4.7 implementation plan (these processes, off-site backups covering the PDFs and the database); technology list if it describes the deployment environment. Do not name a host yet.
+- [ ] reflected (written into `FINALCURRENT - REVIEWED 2.docx` and `- UPDATED 2.docx`; screenshots still to retake)
+
 ### 2.21 Smaller account details  *(2026-11-04)*
 - **Now:** a password reset signs the person out everywhere. Passwords are limited
   to 72 characters. "Different person" at the desk asks for confirmation. The login
@@ -242,12 +248,12 @@ Each entry: what changed → where the paper probably mentions it → what to do
 - **Paper affected:** login figure(s) if a screenshot shows Remember me; Admin
   Dashboard and Reports figures (tile label); Fig 5.14 Change Role screenshot (the
   wording is now corrected, as the 2026-11-04 review asked); Use Case 1 (a reset
-  signs the person out); Use Case 20 (the confirmation); 4.5 test count **263 (1160
+  signs the person out); Use Case 20 (the confirmation); 4.5 test count **269 (1183
   assertions)**, replacing the figures in §2.19 and §2.20.
 - **Also:** the School Records preview lists the first 50 names of each section and has
   one **Download full lists** button, saving a separate CSV per section, (Use Case 21, Fig 5.20).
 - *Look for:* Remember me, Registered Users, reset password.
-- [ ] reflected
+- [ ] reflected (written into `FINALCURRENT - REVIEWED 2.docx` and `- UPDATED 2.docx`; screenshots still to retake)
 
 ### 2.20 Going live, and what a new school list changes  *(2026-11-04)*
 - **Now:** the first Super Admin is created once with a command on the server;
@@ -268,7 +274,7 @@ Each entry: what changed → where the paper probably mentions it → what to do
   labels), Fig 5.20 (preview and desk), My Profile figure (greyed-out name); 4.5
   test count **250 (1074 assertions)**, replacing the figure in §2.19.
 - *Look for:* edit profile, full name, import, earlier account, deployment.
-- [ ] reflected
+- [ ] reflected (written into `FINALCURRENT - REVIEWED 2.docx` and `- UPDATED 2.docx`; screenshots still to retake)
 
 ### 2.19 Limits on staff, deactivation, and names in the school list  *(2026-11-04)*
 - **Now:** staff can reset the password of **students and teachers only**; the
@@ -282,7 +288,7 @@ Each entry: what changed → where the paper probably mentions it → what to do
   screenshot shows staff with Reset Password on a staff or Super Admin row; 4.5
   test count **226 (889 assertions)**.
 - *Look for:* reset password, deactivate, CSV UTF-8, Activate Account alternative flows.
-- [ ] reflected
+- [ ] reflected (written into `FINALCURRENT - REVIEWED 2.docx` and `- UPDATED 2.docx`; screenshots still to retake)
 
 ### 2.18 No self-registration: accounts are activated at the library  *(2026-10-29)*
 - **Now:** there is **no Register page**. A student or teacher goes to the

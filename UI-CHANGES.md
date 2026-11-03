@@ -419,3 +419,11 @@ in `PROJECT-STATUS.md` instead.
   50** link (**Show all N** when there are 50 or fewer), which changes to **Hide the
   names**. Sections with 10 or fewer still show the names straight away.
 - **Commit:** _(not yet pushed)_
+
+### 29. School Records — hide the "not on the list" warning
+- **Screen:** School Records → Current list (Super Admin).
+- **Before:** the warning stayed for as long as any account was not on the list.
+- **Now:** a **Hide** link shrinks it to one line, such as "5 accounts are not on the
+  list · Show". It stays hidden in that browser, and only for the current list: the
+  next import shows the warning again. Accounts are not affected.
+- **Commit:** _(not yet pushed)_
