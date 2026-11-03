@@ -46,8 +46,13 @@ class ImportSchoolRoster extends Command
             return self::FAILURE;
         }
 
-        SchoolRoster::replace($parsed['rows']);
-        $sync = SchoolRoster::syncAccounts();
+        // No --force for this one: nobody could sign in to put it right.
+        if (config('school.directory.driver') === 'csv' && ! SchoolRoster::keepsASuperAdmin($parsed['rows'])) {
+            $this->error('Nothing imported: this list would leave no active Super Admin able to sign in. Check that their ID number and name are on it. On a new system, run php artisan accounts:create-super-admin first; that person can then import the list on the School Records page.');
+            return self::FAILURE;
+        }
+
+        $sync = SchoolRoster::import($parsed['rows']);
 
         $byRole = array_count_values(array_column($parsed['rows'], 'role'));
         $this->info("Imported {$count} people (".collect($byRole)->map(fn ($n, $r) => "{$n} {$r}")->implode(', ').').'
@@ -57,6 +62,12 @@ class ImportSchoolRoster extends Command
         }
         if ($sync['switched_on']) {
             $this->line('Switched back on (on the list again): '.implode(', ', $sync['switched_on']));
+        }
+        if ($sync['needs_activation']) {
+            $this->line('Must be activated again (the name changed): '.implode(', ', $sync['needs_activation']));
+        }
+        if ($sync['role_changed']) {
+            $this->line('Role updated from the list: '.implode(', ', $sync['role_changed']));
         }
         if (config('school.directory.driver') !== 'csv') {
             $this->line('Note: SCHOOL_DIRECTORY_DRIVER is not "csv", so the list is stored but not enforced yet.');

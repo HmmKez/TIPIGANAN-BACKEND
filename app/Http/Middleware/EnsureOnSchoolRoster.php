@@ -44,6 +44,17 @@ class EnsureOnSchoolRoster
             ], 401);
         }
 
+        // Deactivating deletes the account's sessions; this also ends any that
+        // were left over, so a deactivated account can never keep working.
+        if ($user && $user->status === 'deactivated') {
+            $user->currentAccessToken()?->delete();
+
+            return response()->json([
+                'message' => 'Your account has been deactivated. Please contact the administrator.',
+                'reason'  => 'deactivated',
+            ], 401);
+        }
+
         return $next($request);
     }
 }

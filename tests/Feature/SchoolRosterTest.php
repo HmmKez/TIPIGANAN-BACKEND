@@ -266,7 +266,7 @@ class SchoolRosterTest extends TestCase
         $u = $this->account('10002');
         $this->roster([['90001', 'Super', null, 'super_admin']]);
 
-        $this->assertSame(['switched_off' => [], 'switched_on' => []], SchoolRoster::syncAccounts());
+        $this->assertSame(['switched_off' => [], 'switched_on' => [], 'needs_activation' => [], 'role_changed' => []], SchoolRoster::syncAccounts());
         $this->assertSame('active', $u->fresh()->status);
     }
 
@@ -307,8 +307,97 @@ class SchoolRosterTest extends TestCase
         $this->actingAs($staff, 'sanctum')->getJson('/api/school-roster/people')->assertForbidden();
     }
 
+    private function download(User $admin, string $section, string $csv)
+    {
+        return $this->actingAs($admin, 'sanctum')->post('/api/school-roster/preview/download',
+            ['file' => $this->csv($csv), 'section' => $section], ['Accept' => 'application/json']);
+    }
+
+    public function test_the_full_list_downloads_for_a_list_of_thousands(): void
+    {
+        $admin = $this->account('90001', 'super_admin');
+        $now = now();
+        foreach (array_chunk(range(10000, 16999), 500) as $ids) {
+            \Illuminate\Support\Facades\DB::table('users')->insert(array_map(fn ($i) => [
+                'id_number' => (string) $i, 'name' => "Person {$i}", 'email' => "p{$i}@example.com", 'password' => 'x',
+                'role' => 'student', 'status' => 'active', 'created_at' => $now, 'updated_at' => $now,
+            ], $ids));
+        }
+        // 1,000 stay on the list; 6,000 leave.
+        $file = "id_number,first_name,last_name,role\n90001,Super,Admin,super_admin\n";
+        foreach (range(10000, 10999) as $i) {
+            $file .= "{$i},Person,{$i},student\n";
+        }
+
+        $preview = $this->actingAs($admin, 'sanctum')->postJson('/api/school-roster/preview', ['file' => $this->csv($file)])->assertOk();
+        $preview->assertJsonPath('would_lose_access_total', 6000);
+        $this->assertCount(50, $preview->json('would_lose_access'));
+
+        $response = $this->download($admin, 'switched_off', $file)->assertOk();
+        $lines = array_values(array_filter(explode("\n", $response->streamedContent())));
+
+        $this->assertCount(6001, $lines, 'Every account, plus the header.');
+        $this->assertStringContainsString('"ID number",Name,Role,Account', $lines[0]);
+        $this->assertSame('11000,"Person 11000",student,Activated', trim($lines[1]));
+        $this->assertSame('16999,"Person 16999",student,Activated', trim($lines[6000]));
+
+        $this->assertSame('active', User::where('id_number', '16999')->first()->status, 'A download changes nothing.');
+        $this->assertFalse(SchoolRoster::isLoaded());
+    }
+
+    public function test_each_section_downloads_with_its_own_columns(): void
+    {
+        $admin = $this->account('90001', 'super_admin');
+        $admin->update(['name' => 'Super Admin']);
+        $this->account('10001')->update(['name' => 'Old Name']);
+        $this->account('20001', 'teacher')->update(['name' => 'Ana Reyes']);
+        $off = $this->account('10002');
+        $off->update(['name' => 'Back Again', 'status' => 'deactivated', 'deactivated_by_roster' => true]);
+        $file = "id_number,first_name,last_name,role\n90001,Super,Admin,super_admin\n10001,Niño,Peña,student\n20001,Ana,Reyes,student\n10002,Back,Again,student\n12,Short,Id,student\n";
+
+        $names = $this->download($admin, 'name_changes', $file)->assertOk()->streamedContent();
+        $this->assertStringStartsWith("\xEF\xBB\xBF", $names, 'So Excel reads the ñ.');
+        $this->assertStringContainsString('10001,"Old Name","Niño Peña",student', $names);
+
+        $this->assertStringContainsString('20001,"Ana Reyes",teacher,student', $this->download($admin, 'role_changes', $file)->streamedContent());
+        $this->assertStringContainsString('10002,"Back Again",student,Activated', $this->download($admin, 'switched_back_on', $file)->streamedContent());
+        $this->assertStringContainsString('12,', $this->download($admin, 'skipped', $file)->streamedContent());
+
+        $this->download($admin, 'everything', $file)->assertStatus(422);
+    }
+
+    public function test_downloads_keep_leading_zeros_and_defuse_formulas(): void
+    {
+        $admin = $this->account('90001', 'super_admin');
+        $this->account('00042')->update(['name' => "=cmd|'/c calc'!A0"]);
+
+        $csv = $this->download($admin, 'switched_off', "id_number,first_name,role\n90001,Super,super_admin\n")->assertOk()->streamedContent();
+
+        $this->assertStringContainsString('"=""00042"""', $csv);
+        $this->assertStringContainsString("'=cmd", $csv);
+    }
+
+    public function test_the_not_on_list_download_and_who_may_use_them(): void
+    {
+        $admin = $this->account('90001', 'super_admin');
+        $staff = $this->account('90002', 'staff');
+        $this->account('10001');
+        $this->roster([['90001', 'Super', 'Admin', 'super_admin'], ['90002', 'Library', 'Staff', 'staff']]);
+
+        $csv = $this->actingAs($admin, 'sanctum')->get('/api/school-roster/not-on-list/download')->assertOk()->streamedContent();
+        $this->assertStringContainsString('10001,', $csv);
+        $this->assertStringNotContainsString('90002,', $csv);
+
+        $this->assertTrue(\App\Models\AuditLog::where('action', 'download_school_list')->exists());
+
+        $this->actingAs($staff, 'sanctum')->getJson('/api/school-roster/not-on-list/download')->assertForbidden();
+        $this->download($staff, 'switched_off', "id_number,first_name,role\n90001,Super,super_admin\n")->assertForbidden();
+    }
+
     public function test_the_sample_file_and_the_command(): void
     {
+        $this->account('90001', 'super_admin');
+
         $this->artisan('school:import-roster', ['file' => database_path('fixtures/school-roster-sample.csv')])->assertSuccessful();
 
         $this->assertSame(15, SchoolRoster::summary()['total']);

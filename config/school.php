@@ -10,15 +10,15 @@ return [
     | Decides where TIPIGANAN checks whether an ID number belongs to a real,
     | current student or faculty member.
     |
-    |   off   Verification disabled. Registration behaves exactly as it did
-    |         before this feature existed. THIS IS THE DEFAULT, so pulling this
-    |         branch changes nothing for teammates until someone opts in.
+    |   off   The list is not checked at sign-in (activation still requires it).
     |
     |   fake  Verified against database/fixtures/school-directory.json. The full
     |         flow works end to end, which is how it is developed, demonstrated
     |         and tested while the school's own system is unavailable.
     |
-    |   csv   The school's list imported from a CSV file by the Super Admin
+    |   csv   THE DEFAULT, so a live server missing this setting still enforces
+    |         the list instead of quietly not checking it.
+    |         The school's list imported from a CSV file by the Super Admin
     |         (School Records page, or php artisan school:import-roster). Only
     |         IDs on the list can be activated at the library (staff confirm the
     |         name, the person types their own email and password), and ONLY
@@ -33,7 +33,7 @@ return [
 
     'directory' => [
 
-        'driver' => env('SCHOOL_DIRECTORY_DRIVER', 'off'),
+        'driver' => env('SCHOOL_DIRECTORY_DRIVER', 'csv'),
 
         'url'     => env('SCHOOL_DIRECTORY_URL'),
         'key'     => env('SCHOOL_DIRECTORY_KEY'),

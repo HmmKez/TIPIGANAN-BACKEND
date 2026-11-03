@@ -89,6 +89,18 @@ API runs at `http://localhost:8000`
     php artisan serve
     ```
 
+## Going live: the first Super Admin
+
+With `APP_ENV=production`, the seeders create only roles and permissions, never the demo accounts. In a terminal on the server:
+
+```bash
+php artisan migrate --force
+php artisan db:seed --force
+php artisan accounts:create-super-admin
+```
+
+The command asks for the ID number, name, email and password, and works only while no active Super Admin exists. That person then signs in and imports the school list on the School Records page. Their ID number must be on every list.
+
 ## Optional: Meilisearch (better search)
 
 The app works fine without this — search automatically falls back to a plain MySQL query. Meilisearch adds typo-tolerance and relevance ranking on top. Skip this section entirely unless you want that.

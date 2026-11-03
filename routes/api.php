@@ -124,6 +124,8 @@ Route::middleware(['auth:sanctum', 'roster'])->group(function () {
         Route::get('/school-roster',                    [\App\Http\Controllers\Api\SchoolRosterController::class, 'show']);
         Route::get('/school-roster/people',             [\App\Http\Controllers\Api\SchoolRosterController::class, 'people']);
         Route::post('/school-roster/preview',           [\App\Http\Controllers\Api\SchoolRosterController::class, 'preview']);
+        Route::post('/school-roster/preview/download',  [\App\Http\Controllers\Api\SchoolRosterController::class, 'downloadPreview']);
+        Route::get('/school-roster/not-on-list/download', [\App\Http\Controllers\Api\SchoolRosterController::class, 'downloadNotOnList']);
         Route::post('/school-roster/import',            [\App\Http\Controllers\Api\SchoolRosterController::class, 'import']);
     });
 
@@ -136,7 +138,8 @@ Route::middleware(['auth:sanctum', 'roster'])->group(function () {
     // Activating an account at the library desk — every staff member has
     // activate_accounts by default (School Records page).
     Route::middleware(['role:staff|super_admin', 'permission:activate_accounts'])->group(function () {
-        Route::post('/accounts/activation/lookup', [\App\Http\Controllers\Api\AccountActivationController::class, 'lookup']);
+        Route::post('/accounts/activation/lookup', [\App\Http\Controllers\Api\AccountActivationController::class, 'lookup'])
+            ->middleware('throttle:activation-lookup');
         Route::post('/accounts/activation',        [\App\Http\Controllers\Api\AccountActivationController::class, 'activate']);
     });
 

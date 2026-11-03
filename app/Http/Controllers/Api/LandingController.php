@@ -75,7 +75,8 @@ class LandingController extends Controller
                     // featured ones — it is a fact about the archive, and the
                     // grid below it is a curated selection, not the whole truth.
                     'total_categories' => Category::count(),
-                    'total_users'      => User::count(),
+                    // Accounts in use, not those waiting to be activated or closed.
+                    'total_users'      => User::where('needs_activation', false)->count(),
                     // There is no view_count column — a "view" is a row in
                     // reading_history (already deduplicated to one row per
                     // user+thesis per 30-minute session).

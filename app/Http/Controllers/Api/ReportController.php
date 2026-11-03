@@ -222,7 +222,8 @@ class ReportController extends Controller
     {
         $data = SafeCache::remember('reports:dashboard', self::TTL, fn () => [
             'total_theses'     => Thesis::where('status', 'active')->count(),
-            'total_users'      => User::count(),
+            // Accounts in use, not those waiting to be activated or closed.
+            'total_users'      => User::where('needs_activation', false)->count(),
             'total_citations'  => CitationLog::count(),
             'total_categories' => \App\Models\Category::count(),
             'recent_uploads'   => Thesis::with('category', 'uploader')

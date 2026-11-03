@@ -41,6 +41,11 @@ class UserSeeder extends Seeder
 
     public function run(): void
     {
+        if (app()->isProduction()) {
+            $this->command?->error('Demo accounts are not created on a live system.');
+            return;
+        }
+
         foreach (self::ACCOUNTS as $account) {
             // Matched on EMAIL, not id_number. These four have been identified
             // by their address since before ID numbers existed, so it is the

@@ -21,6 +21,9 @@ class UserController extends Controller
         // so "100" finds 10001, 10002…), name or email (anywhere in them).
         $search = trim((string) $request->search);
 
+        // Accounts in use: the tiles count these whatever is filtered below.
+        $inUse = fn () => User::where('needs_activation', false);
+
         $users = User::with('roles', 'permissions')
             // Only accounts that are in use. One still waiting to be activated
             // at the library is not listed here (School Records shows it as
@@ -34,10 +37,23 @@ class UserController extends Controller
                 $q->where('role', $request->role))
             ->when($request->status, fn($q) =>
                 $q->where('status', $request->status))
+            // The tabs. Filtered here, across every account: filtering on the
+            // screen only ever looked at the 15 accounts on the current page.
+            ->when($request->tab === 'students', fn($q) => $q->whereIn('role', ['student', 'teacher']))
+            ->when($request->tab === 'staff', fn($q) => $q->where('role', 'staff'))
+            ->when($request->tab === 'admins', fn($q) => $q->where('role', 'super_admin'))
+            ->when($request->tab === 'deactivated', fn($q) => $q->where('status', 'deactivated'))
             ->latest()
             ->paginate(15);
 
-        return response()->json($users);
+        return response()->json($users->toArray() + [
+            'counts' => [
+                'total'         => $inUse()->count(),
+                'active'        => $inUse()->where('status', 'active')->count(),
+                'deactivated'   => $inUse()->where('status', 'deactivated')->count(),
+                'staff_admins'  => $inUse()->whereIn('role', ['staff', 'super_admin'])->count(),
+            ],
+        ]);
     }
 
     // Get single user
@@ -162,6 +178,10 @@ class UserController extends Controller
         }
         $user->update($changes);
 
+        if ($user->status === 'deactivated') {
+            $user->tokens()->delete();
+        }
+
         AuditLog::create([
             'user_id'     => $request->user()->id,
             'action'      => 'update_user',
@@ -251,6 +271,7 @@ class UserController extends Controller
 
         // By hand: a later school list will not switch it back on.
         $user->update(['status' => 'deactivated', 'deactivated_by_roster' => false]);
+        $user->tokens()->delete();
 
         AuditLog::create([
             'user_id'     => $request->user()->id,
@@ -272,8 +293,24 @@ class UserController extends Controller
         ]);
 
         $user = User::findOrFail($id);
+
+        // Whoever sets a password can sign in as that person, so staff may only
+        // do it for students and teachers - the same line destroy() draws. Their
+        // own password goes through Change Password, which asks for the old one.
+        if ($request->user()->role === 'staff' && in_array($user->role, ['staff', 'super_admin'])) {
+            return response()->json([
+                'message' => 'Staff can only reset the password of a student or teacher account.',
+            ], 403);
+        }
+
         // A password someone else set: remind the owner to change it.
         $user->update(['password' => Hash::make($request->password), 'must_change_password' => true]);
+
+        // Anyone already signed in with the old password is signed out. Resetting
+        // your own keeps the session you are using.
+        $user->tokens()
+            ->when($user->id === $request->user()->id, fn ($q) => $q->whereKeyNot($request->user()->currentAccessToken()?->getKey()))
+            ->delete();
 
         AuditLog::create([
             'user_id'     => $request->user()->id,
@@ -384,12 +421,13 @@ class UserController extends Controller
     // Update own profile
     public function updateProfile(Request $request)
     {
+        // Not the name. It comes from the school's list, identifies the reader in
+        // the PDF watermark, and is compared with the next list that is imported.
         $request->validate([
-            'name'  => 'sometimes|string|max:255',
             'email' => 'sometimes|email|unique:users,email,' . $request->user()->id,
         ]);
 
-        $request->user()->update($request->only(['name', 'email']));
+        $request->user()->update($request->only(['email']));
 
         return response()->json([
             'message' => 'Profile updated successfully.',

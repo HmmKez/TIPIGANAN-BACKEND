@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Setting;
 use App\Models\User;
+use App\Support\AuditCsv;
 use App\Support\SchoolRoster;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +25,7 @@ class SchoolRosterController extends Controller
 {
     private const SHRINK_FLOOR = 0.8;
     private const META_KEY = 'school_roster_import';
+    private const LIST_LIMIT = 50;
 
     public function show()
     {
@@ -36,6 +38,7 @@ class SchoolRosterController extends Controller
             'last_import' => $meta,
             // Accounts that exist but are not on the list - they cannot sign in.
             'accounts_not_on_list' => $this->accountsNotOnList(),
+            'accounts_not_on_list_total' => $this->accountsNotOnListTotal(),
         ]);
     }
 
@@ -87,6 +90,100 @@ class SchoolRosterController extends Controller
         return response()->json($this->check($request));
     }
 
+    /**
+     * Everyone in one section of the preview, as a CSV. The screen lists only
+     * the first 50, and a school's list runs to thousands, so this is how the
+     * person importing can check every name first. Changes no account.
+     */
+    public function downloadPreview(Request $request)
+    {
+        $request->validate(['section' => 'required|in:switched_off,name_changes,role_changes,switched_back_on,skipped']);
+
+        $plan = $this->plan($request);
+        if ($plan['parsed']['error']) {
+            return response()->json(['message' => $plan['parsed']['error']], 422);
+        }
+
+        [$columns, $rows] = match ($request->section) {
+            'switched_off' => [
+                ['ID number', 'Name', 'Role', 'Account'],
+                $this->peopleRows($plan['losing']()),
+            ],
+            'switched_back_on' => [
+                ['ID number', 'Name', 'Role', 'Account'],
+                $this->peopleRows($plan['restoring']()),
+            ],
+            'name_changes' => [
+                ['ID number', 'Current name', 'Name on the list', 'Role'],
+                array_map(fn ($c) => [$c['user']->id_number, (string) $c['user']->name, $c['list_name'], $c['user']->role], $plan['changes']['names']),
+            ],
+            'role_changes' => [
+                ['ID number', 'Name', 'Current role', 'New role'],
+                array_map(fn ($c) => [$c['user']->id_number, $c['user']->display_name, $c['from'], $c['to']], $plan['changes']['roles']),
+            ],
+            'skipped' => [
+                ['Line', 'ID number', 'Why'],
+                array_map(fn ($r) => [(string) $r['line'], $r['id_number'], $r['reason']], $plan['parsed']['rejected']),
+            ],
+        };
+
+        return $this->csvDownload($request, $columns, $rows, 'school-list-'.str_replace('_', '-', $request->section).'.csv');
+    }
+
+    /** Everyone with an account whose ID number is not on the current list. */
+    public function downloadNotOnList(Request $request)
+    {
+        $query = SchoolRoster::isLoaded()
+            ? User::whereNotIn('id_number', fn ($q) => $q->select('id_number')->from('school_roster'))
+            : User::whereRaw('1 = 0');
+
+        return $this->csvDownload($request, ['ID number', 'Name', 'Role', 'Account'], $this->peopleRows($query), 'school-list-not-on-list.csv');
+    }
+
+    private function peopleRows($query): \Generator
+    {
+        foreach ($query->orderBy('id_number')->cursor() as $u) {
+            yield [$u->id_number, $u->display_name, $u->role, $u->needs_activation ? 'Not activated yet' : 'Activated'];
+        }
+    }
+
+    /** Names of many people are leaving the system, so the download leaves a trace. */
+    private function csvDownload(Request $request, array $columns, iterable $rows, string $filename)
+    {
+        AuditLog::create([
+            'user_id'     => $request->user()->id,
+            'action'      => 'download_school_list',
+            'target_type' => 'school_roster',
+            'target_id'   => null,
+            'description' => "{$request->user()->display_name} downloaded {$filename}",
+            'ip_address'  => $request->ip(),
+        ]);
+
+        return response()->streamDownload(function () use ($columns, $rows) {
+            $out = fopen('php://output', 'w');
+            fwrite($out, "\xEF\xBB\xBF");   // So Excel reads ñ correctly.
+            fputcsv($out, $columns);
+            foreach ($rows as $row) {
+                fputcsv($out, array_map([self::class, 'csvCell'], $row));
+            }
+            fclose($out);
+        }, $filename, [
+            'Content-Type'           => 'text/csv; charset=UTF-8',
+            'Cache-Control'          => 'no-store, no-cache',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    /**
+     * Excel would show the ID number 00042 as 42, which is a different person's
+     * number to anyone checking the file, so those are written as text. Everything
+     * else is protected against formulas, as in the audit log export.
+     */
+    private static function csvCell(?string $value): string
+    {
+        return preg_match('/^0\d*$/', (string) $value) ? '="'.$value.'"' : AuditCsv::safe((string) $value);
+    }
+
     public function import(Request $request)
     {
         $result = $this->check($request);
@@ -102,8 +199,7 @@ class SchoolRosterController extends Controller
         }
 
         $rows = SchoolRoster::parse($this->contents($request))['rows'];
-        SchoolRoster::replace($rows);
-        $sync = SchoolRoster::syncAccounts();
+        $sync = SchoolRoster::import($rows, $request->user());
 
         Setting::set(self::META_KEY, json_encode([
             'imported_at' => now()->toIso8601String(),
@@ -121,23 +217,28 @@ class SchoolRosterController extends Controller
             'description' => "{$request->user()->display_name} imported the school list: ".count($rows).' people'
                 .($result['rejected'] ? ', '.count($result['rejected']).' rows rejected' : '')
                 .($sync['switched_off'] ? '; '.count($sync['switched_off']).' accounts switched off' : '')
-                .($sync['switched_on'] ? '; '.count($sync['switched_on']).' accounts switched back on' : ''),
+                .($sync['switched_on'] ? '; '.count($sync['switched_on']).' accounts switched back on' : '')
+                .($sync['needs_activation'] ? '; '.count($sync['needs_activation']).' accounts must be activated again (name changed)' : '')
+                .($sync['role_changed'] ? '; '.count($sync['role_changed']).' roles updated' : ''),
             'metadata'    => ['count' => count($rows), 'by_role' => $result['by_role'], 'rejected' => count($result['rejected'])] + $sync,
             'ip_address'  => $request->ip(),
         ]);
 
         $message = 'School list imported: '.count($rows).' people.'
             .($sync['switched_off'] ? ' '.count($sync['switched_off']).' account'.(count($sync['switched_off']) === 1 ? '' : 's').' not on it switched off.' : '')
-            .($sync['switched_on'] ? ' '.count($sync['switched_on']).' account'.(count($sync['switched_on']) === 1 ? '' : 's').' back on it switched on again.' : '');
+            .($sync['switched_on'] ? ' '.count($sync['switched_on']).' account'.(count($sync['switched_on']) === 1 ? '' : 's').' back on it switched on again.' : '')
+            .($sync['needs_activation'] ? ' '.count($sync['needs_activation']).' account'.(count($sync['needs_activation']) === 1 ? '' : 's').' with a changed name must be activated again.' : '')
+            .($sync['role_changed'] ? ' '.count($sync['role_changed']).' role'.(count($sync['role_changed']) === 1 ? '' : 's').' updated.' : '');
 
         return response()->json(['message' => $message] + $result + $sync + [
             'summary' => SchoolRoster::summary(),
             'accounts_not_on_list' => $this->accountsNotOnList(),
+            'accounts_not_on_list_total' => $this->accountsNotOnListTotal(),
         ]);
     }
 
-    /** Parse the uploaded file and describe what importing it would do. Changes nothing. */
-    private function check(Request $request): array
+    /** Read the uploaded file and work out who it would affect. Changes nothing. */
+    private function plan(Request $request): array
     {
         $request->validate([
             'file' => 'required|file|mimes:csv,txt|max:10240',
@@ -146,13 +247,33 @@ class SchoolRosterController extends Controller
         ]);
 
         $parsed = SchoolRoster::parse($this->contents($request));
+        $ids = array_column($parsed['rows'], 'id_number');
+        $changes = SchoolRoster::accountChanges($parsed['rows'], $request->user());
+        $renamedIds = array_map(fn ($c) => $c['user']->id_number, $changes['names']);
+
+        return [
+            'parsed'    => $parsed,
+            'ids'       => $ids,
+            'changes'   => $changes,
+            'losing'    => fn () => User::where('status', 'active')->whereNotIn('id_number', $ids ?: ['-']),
+            'restoring' => fn () => User::where('deactivated_by_roster', true)->whereIn('id_number', $ids ?: ['-'])->whereNotIn('id_number', $renamedIds ?: ['-']),
+        ];
+    }
+
+    /** What importing the uploaded file would do, for the screen. Changes nothing. */
+    private function check(Request $request): array
+    {
+        ['parsed' => $parsed, 'ids' => $ids, 'changes' => $changes, 'losing' => $losing, 'restoring' => $restoring] = $this->plan($request);
+
         $byRole = array_fill_keys(SchoolRoster::ROLES, 0);
         foreach ($parsed['rows'] as $r) {
             $byRole[$r['role']]++;
         }
-        $ids = array_column($parsed['rows'], 'id_number');
         $previous = SchoolRoster::summary()['total'];
         $valid = count($parsed['rows']);
+        $people = fn ($q) => $q->orderBy('id_number')->limit(self::LIST_LIMIT)->get(['id_number', 'name', 'role'])
+            ->map(fn ($u) => ['id_number' => $u->id_number, 'name' => $u->display_name, 'role' => $u->role])->all();
+        $yourName = collect($changes['names_filled'])->first(fn ($c) => $c['user']->id === $request->user()->id && filled($c['user']->name));
 
         return [
             'error'          => $parsed['error'] ?? ($valid === 0 ? 'No usable rows were found in this file.' : null),
@@ -165,13 +286,24 @@ class SchoolRosterController extends Controller
             'previous_total' => $previous,
             'much_smaller'   => $previous > 0 && $valid < $previous * self::SHRINK_FLOOR,
             // Existing accounts the new list would leave out - they would lose access.
-            'would_lose_access' => User::where('status', 'active')->whereNotIn('id_number', $ids ?: ['-'])->orderBy('id_number')
-                ->limit(50)->get(['id_number', 'name', 'role'])
-                ->map(fn ($u) => ['id_number' => $u->id_number, 'name' => $u->display_name, 'role' => $u->role])->all(),
+            // The lists are capped for the screen; the totals are the true counts.
+            'would_lose_access' => $people($losing()),
+            'would_lose_access_total' => $losing()->count(),
             // Accounts an earlier list switched off that this one has again.
-            'would_restore' => User::where('deactivated_by_roster', true)->whereIn('id_number', $ids ?: ['-'])->orderBy('id_number')
-                ->limit(50)->get(['id_number', 'name', 'role'])
-                ->map(fn ($u) => ['id_number' => $u->id_number, 'name' => $u->display_name, 'role' => $u->role])->all(),
+            'would_restore' => $people($restoring()),
+            'would_restore_total' => $restoring()->count(),
+            // Accounts whose name differs from the list: they must be activated again.
+            'name_changes' => array_map(fn ($c) => [
+                'id_number' => $c['user']->id_number, 'name' => $c['user']->name, 'list_name' => $c['list_name'],
+            ], array_slice($changes['names'], 0, self::LIST_LIMIT)),
+            'name_changes_total' => count($changes['names']),
+            // Students and teachers whose role follows the list.
+            'role_changes' => array_map(fn ($c) => [
+                'id_number' => $c['user']->id_number, 'name' => $c['user']->display_name, 'from' => $c['from'], 'to' => $c['to'],
+            ], array_slice($changes['roles'], 0, self::LIST_LIMIT)),
+            'role_changes_total' => count($changes['roles']),
+            // The person importing keeps their access; their name just updates.
+            'your_new_name' => $yourName['list_name'] ?? null,
         ];
     }
 
@@ -187,7 +319,14 @@ class SchoolRosterController extends Controller
         }
 
         return User::whereNotIn('id_number', fn ($q) => $q->select('id_number')->from('school_roster'))
-            ->orderBy('id_number')->limit(50)->get(['id_number', 'name', 'role'])
+            ->orderBy('id_number')->limit(self::LIST_LIMIT)->get(['id_number', 'name', 'role'])
             ->map(fn ($u) => ['id_number' => $u->id_number, 'name' => $u->display_name, 'role' => $u->role])->all();
+    }
+
+    private function accountsNotOnListTotal(): int
+    {
+        return SchoolRoster::isLoaded()
+            ? User::whereNotIn('id_number', fn ($q) => $q->select('id_number')->from('school_roster'))->count()
+            : 0;
     }
 }

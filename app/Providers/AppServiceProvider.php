@@ -65,7 +65,16 @@ class AppServiceProvider extends ServiceProvider
         // of hunting down every validation call site. No uncompromised()
         // check (Have I Been Pwned lookup) — that's a live external HTTP call
         // on every password set, not worth the dependency/failure mode here.
-        Password::defaults(fn () => Password::min(8)->mixedCase()->numbers());
+        //
+        // The 72 is bcrypt's limit, in bytes: it ignores everything after that,
+        // so a longer password would also accept any text sharing its first 72.
+        Password::defaults(fn () => Password::min(8)->mixedCase()->numbers()->rules([
+            function (string $attribute, mixed $value, \Closure $fail) {
+                if (strlen((string) $value) > 72) {
+                    $fail('The password must not be longer than 72 characters.');
+                }
+            },
+        ]));
 
         // Named limiters, not inline `throttle:120,1` / `throttle:5,1`. An inline
         // throttle keys purely on the client IP (see ThrottleRequests::resolve-
@@ -82,5 +91,10 @@ class AppServiceProvider extends ServiceProvider
         // in AuthController::login, which counts only FAILED attempts.
         RateLimiter::for('auth', fn (Request $request) => Limit::perMinute(20)
             ->by($request->ip()));
+
+        // Each lookup shows a name from the school's list. Plenty for a busy
+        // desk, far too slow for going through the list to collect names.
+        RateLimiter::for('activation-lookup', fn (Request $request) => Limit::perMinute(30)
+            ->by($request->user()?->id ?: $request->ip()));
     }
 }
