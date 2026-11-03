@@ -1,0 +1,5 @@
+# Installed to /etc/cron.d/tipiganan by provision.sh.
+# The scheduler runs backups, file checks and clean-ups (see routes/console.php).
+* * * * * www-data cd __BACKEND__ && /usr/bin/php artisan schedule:run >> /dev/null 2>&1
+# After the 02:00 database backup, copy backups and PDFs off this server.
+30 3 * * * root __BACKEND__/deploy/backup-offsite.sh >> /var/log/tipiganan-backup.log 2>&1

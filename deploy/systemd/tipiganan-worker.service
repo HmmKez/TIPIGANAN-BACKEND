@@ -1,0 +1,20 @@
+[Unit]
+Description=TIPIGANAN queue worker (reads uploaded documents)
+After=network.target mysql.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=__BACKEND__
+# --max-time restarts it hourly, a guard against slow memory growth.
+ExecStart=/usr/bin/php artisan queue:work database --tries=1 --timeout=900 --sleep=3 --max-time=3600
+Restart=always
+RestartSec=5
+# Node.js, used for OCR, must be on the path.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# Lets a document in progress finish when the service stops.
+TimeoutStopSec=930
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

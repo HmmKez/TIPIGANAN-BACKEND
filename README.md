@@ -89,7 +89,11 @@ API runs at `http://localhost:8000`
     php artisan serve
     ```
 
-## Going live: the first Super Admin
+## Going live
+
+The server setup, background processes, updates and backups are in [deploy/README.md](deploy/README.md).
+
+### The first Super Admin
 
 With `APP_ENV=production`, the seeders create only roles and permissions, never the demo accounts. In a terminal on the server:
 

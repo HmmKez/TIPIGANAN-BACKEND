@@ -1,0 +1,15 @@
+[Unit]
+Description=Meilisearch for TIPIGANAN (reachable only from this server)
+After=network.target
+
+[Service]
+User=meilisearch
+Group=meilisearch
+WorkingDirectory=/var/lib/meilisearch
+EnvironmentFile=/etc/tipiganan/meilisearch.env
+ExecStart=/usr/local/bin/meilisearch --http-addr 127.0.0.1:7700 --env production --db-path /var/lib/meilisearch/data.ms --no-analytics
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

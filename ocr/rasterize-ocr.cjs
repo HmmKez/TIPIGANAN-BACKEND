@@ -8,9 +8,16 @@
 // registered and throws "API version X does not match Worker version Y"
 // instead of rendering anything. Keeping pdf-to-img in a fresh process
 // sidesteps that entirely.
+const fs = require('fs');
+const path = require('path');
 const Tesseract = require('tesseract.js');
 
 const filePath = process.argv[2];
+
+// Where Tesseract keeps the language file it downloads on first use. By default
+// that is whichever folder this runs from, which the web server's user may not be
+// allowed to write to on a real server, so OCR would fail there and nowhere else.
+const CACHE_PATH = path.join(__dirname, '..', 'storage', 'app', 'ocr-cache');
 
 // Old scanned theses can run 60-150+ pages. The sections extract.cjs
 // actually looks for only ever live at the front (title/abstract/
@@ -29,6 +36,7 @@ function pickPageNumbers(totalPages) {
 }
 
 async function run() {
+    fs.mkdirSync(CACHE_PATH, { recursive: true });
     const { pdf } = await import('pdf-to-img');
     const document = await pdf(filePath, { scale: 2 });
     const pageNumbers = pickPageNumbers(document.length);
@@ -38,6 +46,7 @@ async function run() {
         const image = await document.getPage(pageNum);
         const { data: { text: pageText } } = await Tesseract.recognize(image, 'eng', {
             logger: () => {},
+            cachePath: CACHE_PATH,
         });
         text += '\n' + pageText;
     }
