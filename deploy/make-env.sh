@@ -38,8 +38,12 @@ sed -e "s/CHANGE_ME_API_DOMAIN/${domain}/g" \
     "${backend}/.env.production.example" > "$env_file"
 chmod 640 "$env_file"
 
-if grep -q 'CHANGE_ME' "$env_file"; then
-    echo "make-env: a CHANGE_ME value was left in ${env_file}." >&2
+# Comment lines may mention CHANGE_ME; only settings count. Leave no half-made
+# .env behind, or the next run would refuse to replace it.
+if grep -Eq '^[^#]*CHANGE_ME' "$env_file"; then
+    echo "make-env: a CHANGE_ME value was left in .env; removing it." >&2
+    grep -E '^[^#]*CHANGE_ME' "$env_file" | cut -d= -f1 >&2
+    rm -f "$env_file"
     exit 1
 fi
 

@@ -383,7 +383,7 @@ php artisan serve  <span class="cm"># runs at http://127.0.0.1:8000</span></pre>
 <div class="callout blue">
   <span class="ct">Requirements</span>
   <ul>
-    <li>Node.js 18+ — https://nodejs.org (use the LTS version)</li>
+    <li>Node.js 22.13+ — https://nodejs.org (use the LTS version)</li>
     <li>npm — comes with Node.js</li>
     <li>Git — https://git-scm.com</li>
     <li>VS Code — https://code.visualstudio.com</li>

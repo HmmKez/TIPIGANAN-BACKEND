@@ -8,14 +8,14 @@ Laravel REST API Backend
 - PHP 8.3+
 - Composer
 - MySQL 8+
-- Node.js 18+ (for npm)
+- Node.js 22.13+ or 24 (for npm and OCR)
 - Laragon (recommended for Windows)
 
 ## Setup Instructions
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/YOUR_USERNAME/tipiganan-backend.git
+git clone https://github.com/HmmKez/TIPIGANAN-BACKEND.git
 cd tipiganan-backend
 ```
 
@@ -51,7 +51,7 @@ API runs at `http://localhost:8000`
 
 ## Initializing a Fresh Clone
 
-1. Make sure PHP 8.3+, Composer, Node.js 18+, and a MySQL database are installed.
+1. Make sure PHP 8.3+, Composer, Node.js 22.13+, and a MySQL database are installed.
 2. Create a database for the project (for example, `tipiganan`).
 3. Clone the repository and enter the project folder.
 4. Install PHP dependencies:
@@ -91,7 +91,7 @@ API runs at `http://localhost:8000`
 
 ## Going live
 
-The server setup, background processes, updates and backups are in [deploy/README.md](deploy/README.md).
+The server requirements, setup, background processes, updates and backups are in [deploy/README.md](deploy/README.md).
 
 ### The first Super Admin
 

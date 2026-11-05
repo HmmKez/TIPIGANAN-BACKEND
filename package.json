@@ -15,7 +15,7 @@
     },
     "dependencies": {
         "pdf-parse": "^2.4.5",
-        "pdf-to-img": "^6.2.0",
+        "pdf-to-img": "^7.0.2",
         "tesseract.js": "^7.0.0"
     }
 }
