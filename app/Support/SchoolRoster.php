@@ -308,6 +308,15 @@ class SchoolRoster
         return $listRole === 'student' ? 'student' : 'teacher';
     }
 
+    /**
+     * The file to send to the school: just the columns. The byte-order mark makes
+     * Excel read ñ correctly when the school fills it in.
+     */
+    public static function template(): string
+    {
+        return "\xEF\xBB\xBFid_number,first_name,last_name,role\r\n";
+    }
+
     /** Is a list loaded at all? An empty list enforces nothing. */
     public static function isLoaded(): bool
     {

@@ -26,6 +26,7 @@ findings still stand unless marked otherwise; this file lists what changed
 *since*.
 
 **Review log.**
+- **2026-11-04 (final check) — `Downloads\CAPSTONE-GROUP7-FINALFINAL.docx` (123 pages) read against the system; the file was not changed.** Test count, permissions, link time and most of §2.19–2.22 are reflected. **Still to fix:** contents page has no page numbers; Fig 4.1.1 still has Register Account and lacks Activate Account and Import School Records; Figs 4.2.2 (Remember me), 4.2.4, 4.2.7 and the first 5.4 (Registered Users), 4.2.8 and 5.7 (Year Published), first 5.14 (old tile labels), 5.17 (editable name) are out of date; Tailwind entry reverted to a false claim; Fig 5.20 text says 5.2a and 5.2b; 'at least 8 to 72'; 'registered users' in Fig 5.14; a missing bracket in Table 4.1.15's caption; 'Figures 5.16'; no sentence end before 'Empty only' in Table 4.4.1; the conclusion says students generate reports; references for Menon and D-RaaS do not match Chapter II.
 - **2026-11-04 (later) — §2.19 to §2.22 written into copies of `Desktop\CAPSTONE-GROUP7-FINALCURRENT - UPDATED.docx` → `- REVIEWED 2.docx` (85 tracked changes, 39 comments, yellow highlight) and `- UPDATED 2.docx` (the same text with no markup; accepting every change in the first gives exactly the second).** Written in: Use Cases 1, 13, 16, 20, 21; Tables 4.4.1 name, email, id_number and needs_activation; 4.5 test count 269/1183 and new test areas; 4.6 step 3 and the closing paragraph; Figs 5.2, 5.4, 5.14, 5.17, 5.20 descriptions. **Team must do:** retake the screenshots named in the comments (5.3 if it shows Remember me, 5.4 and 4.2.4, 5.9 and 4.2.7, 5.14, 5.17, 5.20), decide what 4.6 step 1 says about Vercel once a host is chosen, and update the table of contents in Word, as the paper grew from 120 to 123 pages.
 - **2026-11-04 — `Desktop\CAPSTONE-GROUP7-FINALCURRENT.docx` (119 pages) compared with the system → `- REVIEWED.docx` (yellow highlight, comments, tracked changes) and `- UPDATED.docx` (same corrections, no markup).** The team had reflected §2.18 well: Activate Account (Use Case 20), a rewritten 3.1, a re-exported Figure 3.1.1 and ER diagram, new activation, login, School Records and reminder screenshots. **Still needed, and written in:** test count 214/811; 3.1 said access rules happen in the presentation layer (they are enforced in the application layer); guests can search and cite (1.3, 3.1, Use Case 18); Tailwind is not loaded (Ch III); eleven permissions, two of them grantable; User Management lists only activated accounts and searches by ID (Use Case 1, Fig 5.14); Use Case 17's reason is optional, so its alternative flow could never happen; Use Case 12 refuses duplicate replacement files; Use Case 20 two more refusals; category code is required (Table 4.4.2); Fig 5.20 refers to 5.2a–c, pages 10 per page; 4.7 needs the worker and scheduler; several typos. **Team must redo:** the use case diagram (Fig 4.1.1 still has Register Account, lacks Activate Account and Import School Records); Fig 5.14 screenshots (show accounts no longer listed); Fig 3.1.1's guest box. **System leftovers found:** the Change Role dialog still says "everyone signs up themselves"; the "Registered Users" tiles on the Admin Dashboard and Reports count accounts not yet activated.
 - **2026-10-29 — the team's newer `Downloads\CAPSTONE-GROUP7-revised2m.docx` (saved 10-27 02:37, with the 10-27 tracked changes accepted and reworded; all 8 placeholders replaced by screenshots) → `Downloads\CAPSTONE-GROUP7-revised2m - UPDATED 2.docx`** for §2.18: 129 tracked revisions, 41 "[NEW]" comments, 10 screenshot placeholders (4.2.1, 4.2.2, 4.2.3a/b, 5.1, 5.2a/b, 5.3, 5.20, 5.21). The earlier `- UPDATED.docx` is superseded (left in place). Also fixed the duplicate "Table 4.4.12" (School Roster → 4.4.13).
@@ -235,6 +236,11 @@ Each entry: what changed → where the paper probably mentions it → what to do
 - *Look for:* export, PDF export, audit log, resolved by.
 - [ ] reflected
 
+### 2.23 CSV template for the school  *(2026-11-05)*
+- **Now:** School Records has a **Download CSV template** button for the Super Admin, to send the required columns to the school's IT.
+- **Paper affected:** Use Case 21 (a sub flow for the template); Figure 5.20 description and the "Import a new list" screenshot; 4.5 test count **271 (1193 assertions)**.
+- [ ] reflected
+
 ### 2.22 Deployment preparation  *(2026-11-04)*
 - **Now:** `deploy/README.md` holds the setup for one Ubuntu server: Nginx and PHP-FPM, MySQL, a queue worker for OCR, a scheduler for backups and file checks, and optional Meilisearch and Redis. The hosting decision is still open.
 - **Paper affected:** 4.7 implementation plan (these processes, off-site backups covering the PDFs and the database); technology list if it describes the deployment environment. Do not name a host yet.
@@ -248,7 +254,7 @@ Each entry: what changed → where the paper probably mentions it → what to do
 - **Paper affected:** login figure(s) if a screenshot shows Remember me; Admin
   Dashboard and Reports figures (tile label); Fig 5.14 Change Role screenshot (the
   wording is now corrected, as the 2026-11-04 review asked); Use Case 1 (a reset
-  signs the person out); Use Case 20 (the confirmation); 4.5 test count **269 (1183
+  signs the person out); Use Case 20 (the confirmation); 4.5 test count **271 (1193
   assertions)**, replacing the figures in §2.19 and §2.20.
 - **Also:** the School Records preview lists the first 50 names of each section and has
   one **Download full lists** button, saving a separate CSV per section, (Use Case 21, Fig 5.20).

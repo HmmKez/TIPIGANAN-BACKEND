@@ -394,6 +394,34 @@ class SchoolRosterTest extends TestCase
         $this->download($staff, 'switched_off', "id_number,first_name,role\n90001,Super,super_admin\n")->assertForbidden();
     }
 
+    public function test_the_template_downloads_for_the_super_admin_only(): void
+    {
+        $admin = $this->account('90001', 'super_admin');
+        $staff = $this->account('90002', 'staff');
+
+        $response = $this->actingAs($admin, 'sanctum')->get('/api/school-roster/template')->assertOk();
+        $response->assertHeader('Content-Disposition', 'attachment; filename="school-list-template.csv"');
+        $this->assertSame("\xEF\xBB\xBFid_number,first_name,last_name,role\r\n", $response->getContent());
+
+        $this->actingAs($staff, 'sanctum')->getJson('/api/school-roster/template')->assertForbidden();
+    }
+
+    public function test_the_template_is_only_the_columns_the_import_reads(): void
+    {
+        $admin = $this->account('90001', 'super_admin');
+
+        // Empty, it is refused rather than wiping the list.
+        $this->actingAs($admin, 'sanctum')->postJson('/api/school-roster/import', ['file' => $this->csv(SchoolRoster::template())])
+            ->assertStatus(422);
+        $this->assertFalse(SchoolRoster::isLoaded());
+
+        // Filled in, it imports.
+        $filled = SchoolRoster::template()."90001,Super,Admin,super_admin\r\n10001,Sample,Concha,student\r\n";
+        $this->actingAs($admin, 'sanctum')->postJson('/api/school-roster/import', ['file' => $this->csv($filled)])
+            ->assertOk()->assertJsonPath('summary.total', 2);
+        $this->assertSame('Sample', SchoolRoster::find('10001')->first_name);
+    }
+
     public function test_the_sample_file_and_the_command(): void
     {
         $this->account('90001', 'super_admin');

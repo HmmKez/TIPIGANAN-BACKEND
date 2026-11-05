@@ -978,6 +978,9 @@ User reported (screenshot, Collection Management): opening a row's Actions menu 
 - **Second, older bug found by the same check:** the catcher sat at z-index 60, below the sidebar (100), so clicking the sidebar while a menu was open left the menu hanging open. Catcher → 101, menu → 102; modals (1000) stay above both.
 - **Verified** at 1366 / 1024 / 768 / 375 px on Collections, Categories and Users: every menu item is the topmost element at its own centre, and a click outside closes the menu. **The check was confirmed to fail on the old component** — at 1024 px it reported exactly the three items in the user's screenshot as covered. Reported Items uses the same component but had no open reports to test with; Audit Logs' row button opens a details modal, not a menu.
 
+### School Records: CSV template to send to the school (2026-11-05)
+**Download CSV template** under Import a new list (Super Admin only, `GET /school-roster/template`) saves `school-list-template.csv`: just the four columns, with a byte-order mark so Excel reads ñ. Example rows were tried first and removed the same day at the user's request, along with the rule that skipped them. An unfilled template is refused with no change to the list. Suite **271 tests, 1193 assertions**, all passing. The download, its refusal and a filled-in import were checked in a browser with the example rows; the header-only version is covered by the automated tests. Team guide and functionalities PDFs regenerated.
+
 ### Paper and guides brought up to date (2026-11-04)
 Paper: `Desktop\CAPSTONE-GROUP7-FINALCURRENT - REVIEWED 2.docx` and `- UPDATED 2.docx`, made from `- UPDATED.docx`, which is unchanged; see the `PAPER-CHANGES.md` review log. Team guide and functionalities sources corrected (name no longer editable, who can reset passwords, the 72-character limit, new-list behaviour, downloads, `deploy/`) and both PDFs regenerated. The blueprint PDF was not touched.
 

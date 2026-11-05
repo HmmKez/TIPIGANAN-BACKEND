@@ -123,6 +123,7 @@ Route::middleware(['auth:sanctum', 'roster'])->group(function () {
         // The school's list of who may use the system (CSV import).
         Route::get('/school-roster',                    [\App\Http\Controllers\Api\SchoolRosterController::class, 'show']);
         Route::get('/school-roster/people',             [\App\Http\Controllers\Api\SchoolRosterController::class, 'people']);
+        Route::get('/school-roster/template',           [\App\Http\Controllers\Api\SchoolRosterController::class, 'template']);
         Route::post('/school-roster/preview',           [\App\Http\Controllers\Api\SchoolRosterController::class, 'preview']);
         Route::post('/school-roster/preview/download',  [\App\Http\Controllers\Api\SchoolRosterController::class, 'downloadPreview']);
         Route::get('/school-roster/not-on-list/download', [\App\Http\Controllers\Api\SchoolRosterController::class, 'downloadNotOnList']);

@@ -427,3 +427,12 @@ in `PROJECT-STATUS.md` instead.
   list · Show". It stays hidden in that browser, and only for the current list: the
   next import shows the warning again. Accounts are not affected.
 - **Commit:** _(not yet pushed)_
+
+## 2026-11-05
+
+### 30. School Records — Download CSV template
+- **Screen:** School Records → Import a new list (Super Admin).
+- **Before:** the columns were only described in the page's text.
+- **Now:** a **Download CSV template** button saves `school-list-template.csv`, with
+  just the required columns, to send to the school's IT.
+- **Commit:** _(not yet pushed)_

@@ -130,6 +130,16 @@ class SchoolRosterController extends Controller
         return $this->csvDownload($request, $columns, $rows, 'school-list-'.str_replace('_', '-', $request->section).'.csv');
     }
 
+    /** The format to send to the school's IT. It holds no real data. */
+    public function template()
+    {
+        return response(SchoolRoster::template(), 200, [
+            'Content-Type'        => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="school-list-template.csv"',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
     /** Everyone with an account whose ID number is not on the current list. */
     public function downloadNotOnList(Request $request)
     {
