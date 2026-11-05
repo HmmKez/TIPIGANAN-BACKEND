@@ -141,11 +141,17 @@ class DeployCheck extends Command
             Cache::forget($key);
             $this->result($works, 'Cache works ('.config('cache.default').')', 'The cache did not keep a value ('.config('cache.default').')');
         } catch (\Throwable $e) {
-            $this->warning('The cache ('.config('cache.default').') is not reachable. The system still runs, more slowly: '.$e->getMessage());
+            $this->required('The cache ('.config('cache.default').') is not reachable: '.$e->getMessage());
+        }
+
+        // Required on a live system. The app can fall back without them, which
+        // is what keeps it up during an outage, so nothing else would report it.
+        if (config('cache.default') !== 'redis') {
+            $this->required('CACHE_STORE is '.config('cache.default').', but Redis is required on a live system');
         }
 
         if (config('scout.driver') !== 'meilisearch') {
-            $this->line('  --    Search uses the database (SCOUT_DRIVER is '.config('scout.driver').')');
+            $this->required('SCOUT_DRIVER is '.config('scout.driver').', but Meilisearch is required on a live system');
 
             return;
         }
@@ -157,7 +163,7 @@ class DeployCheck extends Command
         }
         $healthy
             ? $this->result(true, 'Meilisearch is running')
-            : $this->warning('Meilisearch is not reachable. Search still works, without typo tolerance');
+            : $this->required('Meilisearch is not reachable. Search is falling back to MySQL, without typo tolerance');
     }
 
     private function backgroundWork(): void
@@ -232,6 +238,12 @@ class DeployCheck extends Command
 
         $this->failed++;
         $this->line("  FAIL  {$fail}");
+    }
+
+    /** A failure on a live system; on a development machine, only worth a look. */
+    private function required(string $message): void
+    {
+        app()->isProduction() ? $this->result(false, '', $message) : $this->warning($message);
     }
 
     private function warning(string $message): void

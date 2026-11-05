@@ -236,6 +236,11 @@ Each entry: what changed → where the paper probably mentions it → what to do
 - *Look for:* export, PDF export, audit log, resolved by.
 - [ ] reflected
 
+### 2.25 Meilisearch and Redis are required on the live server  *(2026-11-05)*
+- **Now:** both are required when the system is deployed. If one stops, the system still falls back to MySQL search or slower caching, so it stays up.
+- **Paper affected:** 3.1 ("This is optional", "Redis (optional)"), 3.2 (Redis "is optional"), 4.7 ("Meilisearch and Redis are optional. The system works perfectly without them."), and the "(optional)" labels in Figure 3.1.1. 4.5 test count **273 (1202 assertions)**.
+- [ ] reflected
+
 ### 2.24 The school's IT will deploy the system  *(2026-11-05)*
 - **Now:** the school's IT agreed to deploy the system on the school's own server, using `deploy/README.md`. It has not been deployed yet.
 - **Paper affected:** 4.6 step 1 and 4.7, which say the frontend is on Vercel and that dedicated hosting hasn't been secured. The Node.js requirement is now 22.13 or newer if the paper gives a version.

@@ -8,6 +8,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
@@ -101,6 +102,41 @@ class DeployCheckTest extends TestCase
         $demo->update(['password' => Hash::make('SomethingReal9')]);
         [, $out] = $this->runCheck();
         $this->assertStringContainsString('No demo accounts', $out);
+    }
+
+    public function test_redis_and_meilisearch_are_required_on_a_live_system(): void
+    {
+        $this->good();
+        $this->app->detectEnvironment(fn () => 'production');
+
+        [$code, $out] = $this->runCheck();
+        $this->assertSame(1, $code);
+        $this->assertStringContainsString('FAIL  CACHE_STORE is array, but Redis is required', $out);
+        $this->assertStringContainsString('FAIL  SCOUT_DRIVER is collection, but Meilisearch is required', $out);
+
+        config(['cache.stores.redis' => ['driver' => 'array', 'serialize' => false], 'cache.default' => 'redis', 'scout.driver' => 'meilisearch', 'scout.meilisearch.host' => 'http://meili.test']);
+        Http::fake(['meili.test/*' => Http::response(['status' => 'available'])]);
+        [, $out] = $this->runCheck();
+        $this->assertStringNotContainsString('Redis is required', $out);
+        $this->assertStringContainsString('ok    Meilisearch is running', $out);
+
+        Http::fake(['meili.test/*' => Http::response('', 500)]);
+        $this->app->forgetInstance(\Illuminate\Http\Client\Factory::class);
+        Http::clearResolvedInstances();
+        Http::fake(['meili.test/*' => Http::response('', 500)]);
+        [$code, $out] = $this->runCheck();
+        $this->assertSame(1, $code);
+        $this->assertStringContainsString('FAIL  Meilisearch is not reachable', $out);
+    }
+
+    public function test_on_a_development_machine_they_are_only_a_warning(): void
+    {
+        $this->good();
+
+        [, $out] = $this->runCheck();
+
+        $this->assertStringContainsString('WARN  CACHE_STORE is array', $out);
+        $this->assertStringContainsString('WARN  SCOUT_DRIVER is collection', $out);
     }
 
     public function test_it_reports_a_missing_super_admin_and_list(): void

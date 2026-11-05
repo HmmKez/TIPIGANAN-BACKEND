@@ -29,14 +29,14 @@ point. Please send any errors to the development team so the scripts can be fixe
 | **MySQL** | 8 or newer (tested on 8.4), including `mysqldump` | Data and backups |
 | **qpdf** | Any current version | Prepares PDFs for watermarking. Without it, many PDFs upload but will not open. |
 | **Web server** | Nginx with PHP-FPM (config provided), or Apache | Website and API |
-| Meilisearch | 1.49 (optional) | Search with typo tolerance. Without it, search uses MySQL. |
-| Redis | Optional | Faster caching. Without it, set `CACHE_STORE=database`. |
+| **Meilisearch** | 1.49 | Search with typo tolerance. Required. |
+| **Redis** | Any current version | Caching and login rate limits. Required. |
 
 ### Resources
 
 | Resource | Minimum | Why |
 | --- | --- | --- |
-| Memory | 2 GB, ideally 4 GB | A 135 MB scan peaked at 290 MB when opened, and OCR on 20 pages peaked at about 240 MB. Each runs at the same time as MySQL and other users. |
+| Memory | 4 GB recommended | A 135 MB scan peaked at 290 MB when opened, and OCR on 20 pages peaked at about 240 MB. Each runs at the same time as MySQL and other users. |
 | CPU | 2 cores | OCR on 20 pages took 47 seconds on a development machine |
 | Disk | 20 GB, plus space for the PDFs and backups | Each PDF can be up to 150 MB, and is kept with a backup copy until replaced files expire. Estimate from the size of the collection. |
 
@@ -44,7 +44,7 @@ point. Please send any errors to the development team so the scripts can be fixe
 
 - **A domain or subdomain with https.** The system expects https in production.
 - **Inbound:** ports 80 and 443 only. MySQL, Redis and Meilisearch must stay private.
-- **Outbound, during setup:** GitHub, Composer (packagist.org), npm (npmjs.org) and
+- **Outbound, during setup:** GitHub (also hosts the Meilisearch download), Composer (packagist.org), npm (npmjs.org) and
   the operating system's package source.
 - **Outbound, once:** the first OCR downloads a 5 MB English language file into
   `storage/app/ocr-cache`. If the server has no outbound access, copy that file there
@@ -64,11 +64,13 @@ point. Please send any errors to the development team so the scripts can be fixe
 | MySQL | Data | A system service |
 | **Queue worker** | Reads uploaded documents | `tipiganan-worker` service: `php artisan queue:work database --tries=1 --timeout=900` |
 | **Scheduler** | Backups at 02:00, purging replaced files, weekly file checks, monthly log archiving | Cron, every minute: `php artisan schedule:run` |
-| Meilisearch (optional) | Search with typo tolerance | `tipiganan-meilisearch` service, reachable only from the server itself |
-| Redis (optional) | Faster caching | A system service |
+| **Meilisearch** | Search with typo tolerance | `tipiganan-meilisearch` service, reachable only from the server itself |
+| **Redis** | Caching and login rate limits | A system service, password protected |
 
 If the worker stops, documents silently stop being read. If the scheduler stops,
-backups silently stop. `php artisan deploy:check` reports both.
+backups silently stop. If Redis or Meilisearch stops, the system falls back to slower
+caching and plainer search rather than going down. `php artisan deploy:check` reports
+all of these.
 
 ## Getting the code
 
@@ -99,9 +101,8 @@ or for a copy of the code. Use the `main` branch.
    ```
 
    It installs the software, creates `.env` with new random passwords, sets up the
-   database, builds the website and starts the background processes. Add
-   `NO_MEILISEARCH=1` to skip Meilisearch. A `FAIL` for no Super Admin at the end is
-   expected.
+   database, Redis and Meilisearch, builds the website and starts the background
+   processes. A `FAIL` for no Super Admin at the end is expected.
 
 3. Continue with [Before people use it](#before-people-use-it).
 
@@ -129,6 +130,14 @@ php artisan view:cache
 
 Create a dedicated MySQL database and user, not root. The web server's user must be
 able to write to `storage` and `bootstrap/cache`.
+
+**Redis and Meilisearch:** both must run on this server, without public access.
+- Set a password on Redis.
+- Download Meilisearch 1.49.0 from its GitHub releases, and start it with
+  `--http-addr 127.0.0.1:7700 --env production` and a master key.
+  `deploy/systemd/tipiganan-meilisearch.service` shows how.
+- Use the same password and key in `.env`, and once Meilisearch is running, run
+  `php artisan scout:sync-index-settings`.
 
 **Frontend:**
 
@@ -164,8 +173,8 @@ set `DB_DUMP_BINARY` and `QPDF_BINARY` to their full paths, using forward slashe
 | `FRONTEND_URL` | The website's https address. The same as `APP_URL` when both share a domain. |
 | `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | The dedicated database user |
 | `QUEUE_CONNECTION` / `DB_QUEUE_RETRY_AFTER` | `database` / `1000`. Keep these as they are. |
-| `CACHE_STORE`, `REDIS_PASSWORD` | `redis` with its password, or `database` without Redis |
-| `SCOUT_DRIVER`, `MEILISEARCH_KEY` | `meilisearch` with its master key, or `database` without it |
+| `CACHE_STORE`, `REDIS_PASSWORD` | `redis`, with its password |
+| `SCOUT_DRIVER`, `MEILISEARCH_KEY` | `meilisearch`, with its master key |
 | `SCAN_INBOX_PATH` | The scanner folder. Blank uses `storage/app/scan-inbox`. |
 
 After changing `.env`, run `php artisan config:cache` and restart the worker.
@@ -262,6 +271,7 @@ folder, staff can still upload scans by hand.
 | PDFs upload but will not open | Check that qpdf is installed, then run `php artisan deploy:check` |
 | Large uploads fail | The web server's and PHP's upload limits |
 | Backups are not appearing | `cat /etc/cron.d/tipiganan`, `grep CRON /var/log/syslog` |
-| Search has no typo tolerance | `systemctl status tipiganan-meilisearch` |
+| Search has no typo tolerance | `systemctl status tipiganan-meilisearch`, then `php artisan deploy:check` |
+| Pages are slow, or Redis errors in the logs | `systemctl status redis-server`, and that `REDIS_PASSWORD` matches |
 | A `.env` change has no effect | `php artisan config:cache`, then restart the worker |
 | Search misses items after a restore | `php artisan scout:import "App\Models\Thesis"` |

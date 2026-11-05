@@ -5,7 +5,7 @@
 #   sudo DOMAIN=repo.example.com FRONTEND=/var/www/tipiganan/frontend bash deploy/provision.sh
 #
 # Optional: EMAIL=you@example.com turns on https with Let's Encrypt (the domain
-# must already point at this server), and NO_MEILISEARCH=1 skips Meilisearch.
+# must already point at this server). Meilisearch and Redis are always set up.
 # It does not create the first Super Admin; see deploy/README.md.
 set -euo pipefail
 
@@ -121,32 +121,28 @@ mkdir -p /etc/tipiganan
 [ -e /etc/tipiganan/backup.env ] || printf '# Where backups are copied, for example backup@host:/backups/tipiganan\nBACKUP_TARGET=\n' > /etc/tipiganan/backup.env
 chmod 600 /etc/tipiganan/backup.env
 
-if [ -z "${NO_MEILISEARCH:-}" ]; then
-    case "$(uname -m)" in
-        x86_64) meili_arch=amd64 ;;
-        aarch64) meili_arch=aarch64 ;;
-        *) echo "Unsupported processor: $(uname -m)" >&2; exit 1 ;;
-    esac
-    if [ ! -x /usr/local/bin/meilisearch ]; then
-        curl -fsSL -o /usr/local/bin/meilisearch \
-            "https://github.com/meilisearch/meilisearch/releases/download/${MEILISEARCH_VERSION}/meilisearch-linux-${meili_arch}"
-        chmod 755 /usr/local/bin/meilisearch
-    fi
-    id meilisearch >/dev/null 2>&1 || useradd --system --home /var/lib/meilisearch --shell /usr/sbin/nologin meilisearch
-    mkdir -p /var/lib/meilisearch
-    chown meilisearch:meilisearch /var/lib/meilisearch
-    if [ -n "${MEILI_MASTER_KEY:-}" ]; then
-        printf 'MEILI_MASTER_KEY=%s\n' "$MEILI_MASTER_KEY" > /etc/tipiganan/meilisearch.env
-        chmod 600 /etc/tipiganan/meilisearch.env
-    fi
-    cp "$BACKEND/deploy/systemd/tipiganan-meilisearch.service" /etc/systemd/system/
-    systemctl daemon-reload
-    systemctl enable --now tipiganan-meilisearch
-    sleep 3
-    as_web php artisan scout:sync-index-settings || echo "Search settings not synced yet; update.sh tries again."
-else
-    sed -i 's/^SCOUT_DRIVER=.*/SCOUT_DRIVER=database/' .env
+case "$(uname -m)" in
+    x86_64) meili_arch=amd64 ;;
+    aarch64) meili_arch=aarch64 ;;
+    *) echo "Unsupported processor: $(uname -m)" >&2; exit 1 ;;
+esac
+if [ ! -x /usr/local/bin/meilisearch ]; then
+    curl -fsSL -o /usr/local/bin/meilisearch \
+        "https://github.com/meilisearch/meilisearch/releases/download/${MEILISEARCH_VERSION}/meilisearch-linux-${meili_arch}"
+    chmod 755 /usr/local/bin/meilisearch
 fi
+id meilisearch >/dev/null 2>&1 || useradd --system --home /var/lib/meilisearch --shell /usr/sbin/nologin meilisearch
+mkdir -p /var/lib/meilisearch
+chown meilisearch:meilisearch /var/lib/meilisearch
+if [ -n "${MEILI_MASTER_KEY:-}" ]; then
+    printf 'MEILI_MASTER_KEY=%s\n' "$MEILI_MASTER_KEY" > /etc/tipiganan/meilisearch.env
+    chmod 600 /etc/tipiganan/meilisearch.env
+fi
+cp "$BACKEND/deploy/systemd/tipiganan-meilisearch.service" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now tipiganan-meilisearch
+sleep 3
+as_web php artisan scout:sync-index-settings
 
 systemctl daemon-reload
 systemctl enable --now tipiganan-worker
