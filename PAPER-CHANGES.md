@@ -236,6 +236,11 @@ Each entry: what changed → where the paper probably mentions it → what to do
 - *Look for:* export, PDF export, audit log, resolved by.
 - [ ] reflected
 
+### 2.24 The school's IT will deploy the system  *(2026-11-05)*
+- **Now:** the school's IT agreed to deploy the system on the school's own server, using `deploy/README.md`. It has not been deployed yet.
+- **Paper affected:** 4.6 step 1 and 4.7, which say the frontend is on Vercel and that dedicated hosting hasn't been secured. The Node.js requirement is now 22.13 or newer if the paper gives a version.
+- [ ] reflected
+
 ### 2.23 CSV template for the school  *(2026-11-05)*
 - **Now:** School Records has a **Download CSV template** button for the Super Admin, to send the required columns to the school's IT.
 - **Paper affected:** Use Case 21 (a sub flow for the template); Figure 5.20 description and the "Import a new list" screenshot; 4.5 test count **271 (1193 assertions)**.

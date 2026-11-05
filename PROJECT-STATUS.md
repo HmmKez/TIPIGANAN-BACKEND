@@ -983,7 +983,7 @@ The school's IT will deploy on the school's own server. `deploy/README.md` is re
 - **Security updates, found by auditing a fresh clone:** the lock file had 36 Composer advisories, plus 10 npm ones, including a critical Laravel authentication bypass. `composer update` moved Laravel to 13.40; `pdf-to-img` went to 7.0.2 (needs Node 22.13+); `npm audit fix` updated the frontend. `composer audit` and both `npm audit --omit=dev` now report none.
 - **Bug fixed:** `make-env.sh` always failed on a word in a template comment, so `provision.sh` would have stopped at once. Found by the fresh-clone test.
 - **Measured:** OCR on 20 pages peaked at about 240 MB and took 47 seconds on this machine.
-- **Verified:** suite 271 tests, 1193 assertions. Fresh clones, production mode, throwaway MySQL: see the commit notes for the browser check. The Linux scripts have still never run on Linux.
+- **Verified:** suite 271 tests, 1193 assertions. A fresh clone in production mode on a throwaway MySQL database, on Windows: install from the lock files, migrate, seed (no demo accounts), all four caches, a real worker running OCR on image-only pages, a backup and the scheduler. On its production frontend build, a 15-step browser check passed, including activation at the desk with ñ and a watermarked PDF in the viewer. The Linux scripts have still never run on Linux.
 - **Repositories:** private, so the school's IT needs read access from the owner. `main` fast-forwarded to `dev`.
 
 ### School Records: CSV template to send to the school (2026-11-05)
