@@ -80,7 +80,7 @@ or for a copy of the code. Use the `main` branch.
 - Backend: `https://github.com/HmmKez/TIPIGANAN-BACKEND`
 - Frontend: `https://github.com/HmmKez/TIPIGANAN-FRONTEND`
 
-## Install on Ubuntu 24.04
+## Install on Ubuntu 24.04 (IF AVAILABLE)
 
 1. Clone both projects, as your normal user:
 
@@ -106,7 +106,7 @@ or for a copy of the code. Use the `main` branch.
 
 3. Continue with [Before people use it](#before-people-use-it).
 
-## Install on another system
+## Install on another system (ALTERNATIVE)
 
 Use these steps on another Linux system, or on Windows Server with IIS or Apache.
 
