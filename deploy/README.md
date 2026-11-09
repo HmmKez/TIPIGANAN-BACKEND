@@ -269,6 +269,7 @@ folder, staff can still upload scans by hand.
 | Failed OCR jobs | `php artisan queue:failed` |
 | Errors in the app | `storage/logs/` |
 | PDFs upload but will not open | Check that qpdf is installed, then run `php artisan deploy:check` |
+| Readers see "Failed to load PDF file." but staff Preview works | The browser console shows `pdf.worker` sent as `application/octet-stream`. The `.mjs` block under `/assets/` in the nginx config is missing. |
 | Large uploads fail | The web server's and PHP's upload limits |
 | Backups are not appearing | `cat /etc/cron.d/tipiganan`, `grep CRON /var/log/syslog` |
 | Search has no typo tolerance | `systemctl status tipiganan-meilisearch`, then `php artisan deploy:check` |
